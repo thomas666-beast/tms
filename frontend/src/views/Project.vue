@@ -8,7 +8,7 @@
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else-if="project">
-      <div class="file-header">
+      <div v-if="!editing" class="file-header">
         <div>
           <h1 class="file-title">{{ project.name }}</h1>
           <div class="file-meta">
@@ -18,6 +18,27 @@
             <span class="dot">·</span>
             <span>{{ t('projects.columns.members') }}: {{ members.length }}</span>
           </div>
+        </div>
+        <div v-if="canManageMembers" class="row-actions">
+          <button @click="startEdit" class="btn-link">{{ t('projects.edit') }}</button>
+        </div>
+      </div>
+
+      <div v-else class="form-box">
+        <h3>{{ t('projects.editTitle') }}</h3>
+        <div class="form-grid">
+          <label>
+            {{ t('projects.editName') }}
+            <input v-model="editDraft.name" />
+          </label>
+          <label>
+            {{ t('projects.editLang') }}
+            <input v-model="editDraft.default_source_lang" />
+          </label>
+        </div>
+        <div class="row-actions">
+          <button @click="saveEdit" :disabled="busy" class="primary">{{ t('projects.editSave') }}</button>
+          <button @click="cancelEdit" class="ghost">{{ t('projects.editCancel') }}</button>
         </div>
       </div>
 
@@ -146,6 +167,9 @@ const error = ref('')
 const uploading = ref(false)
 const busy = ref(false)
 
+const editing = ref(false)
+const editDraft = reactive({ name: '', default_source_lang: '' })
+
 const addingMember = ref(false)
 const newMember = reactive({ user_id: '', role: 'translator' })
 
@@ -175,6 +199,27 @@ async function load() {
     else if (e.status === 404) error.value = t('projects.notFound')
     else error.value = e.message
   } finally { loading.value = false }
+}
+
+function startEdit() {
+  editing.value = true
+  editDraft.name = project.value.name
+  editDraft.default_source_lang = project.value.default_source_lang
+}
+function cancelEdit() { editing.value = false }
+
+async function saveEdit() {
+  busy.value = true
+  error.value = ''
+  try {
+    await api.patch(`/api/v1/projects/${route.params.id}`, {
+      name: editDraft.name,
+      default_source_lang: editDraft.default_source_lang,
+    })
+    editing.value = false
+    await load()
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
 }
 
 async function startAddMember() {

@@ -3,28 +3,43 @@ use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 sub list ($c) {
   my $u = $c->current_user;
+  my $only_mine = ($c->param('assigned') // '') eq '1' ? 1 : 0;
 
-  my $rows = $u->{role} eq 'admin'
-    ? $c->db->query(
-        q{
-          SELECT p.id, p.name, p.slug, p.default_source_lang,
-                 p.created_at, p.updated_at,
-                 (SELECT count(*) FROM project_members m WHERE m.project_id = p.id) AS members_count
-            FROM projects p
-           ORDER BY p.created_at DESC, p.id DESC
-        },
-      )->hashes
-    : $c->db->query(
-        q{
-          SELECT p.id, p.name, p.slug, p.default_source_lang,
-                 p.created_at, p.updated_at, m.role AS member_role,
-                 (SELECT count(*) FROM project_members m2 WHERE m2.project_id = p.id) AS members_count
-            FROM projects p
-            JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
-           ORDER BY p.created_at DESC, p.id DESC
-        },
-        $u->{id},
-      )->hashes;
+  my $rows;
+  if ($u->{role} eq 'admin') {
+    $rows = $c->db->query(
+      q{
+        SELECT p.id, p.name, p.slug, p.default_source_lang,
+               p.created_at, p.updated_at,
+               (SELECT count(*) FROM project_members m WHERE m.project_id = p.id) AS members_count
+          FROM projects p
+         ORDER BY p.created_at DESC, p.id DESC
+      },
+    )->hashes;
+  }
+  else {
+    my $filter_sql = $only_mine
+      ? q{ AND EXISTS (
+             SELECT 1 FROM files f
+              WHERE f.project_id = p.id
+                AND f.assigned_to_user_id = m.user_id
+           ) }
+      : '';
+
+    $rows = $c->db->query(
+      q{
+        SELECT p.id, p.name, p.slug, p.default_source_lang,
+               p.created_at, p.updated_at, m.role AS member_role,
+               (SELECT count(*) FROM project_members m2 WHERE m2.project_id = p.id) AS members_count
+          FROM projects p
+          JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
+         WHERE 1 = 1
+      } . $filter_sql . q{
+         ORDER BY p.created_at DESC, p.id DESC
+      },
+      $u->{id},
+    )->hashes;
+  }
 
   $c->render(json => {
     projects => [ map { _public_project($_) } @$rows ],
@@ -40,7 +55,6 @@ sub create ($c) {
   return _err($c, 400, 'default_source_lang_required') unless length $lang;
 
   my $u = $c->current_user;
-
   my $slug = _unique_slug($c, $name);
 
   my $project = $c->db->query(
@@ -113,7 +127,6 @@ sub update ($c) {
   my $member = $c->project_member($id);
   my $is_project_admin = $u->{role} eq 'admin'
     || ($member && $member->{role} eq 'admin');
-
   return _err($c, 403, 'forbidden') unless $is_project_admin;
 
   my $project = $c->db->query(

@@ -50,6 +50,13 @@ export default {
     memberUser: 'User', memberRole: 'Role',
     addMemberSubmit: 'Add', removeMember: 'Remove',
     confirmRemoveMember: 'Remove this member?',
+    onlyMine: 'Only projects with my files',
+    edit: 'Edit',
+    editTitle: 'Edit project',
+    editName: 'Name',
+    editLang: 'Default source language',
+    editSave: 'Save',
+    editCancel: 'Cancel',
   },
   files: {
     empty: 'No files yet.', upload: '+ Upload file',

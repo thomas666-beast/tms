@@ -10,6 +10,13 @@
       </div>
     </div>
 
+    <div v-if="!isAdmin" class="toolbar">
+      <label class="compare-toggle">
+        <input type="checkbox" v-model="onlyMine" @change="load" />
+        {{ t('projects.onlyMine') }}
+      </label>
+    </div>
+
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
     <div v-else-if="filtered.length === 0" class="empty-block">
@@ -56,6 +63,7 @@ const projects = ref([])
 const loading = ref(true)
 const error = ref('')
 const search = ref('')
+const onlyMine = ref(false)
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
 
@@ -71,7 +79,8 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await api.get('/api/v1/projects')
+    const q = onlyMine.value ? '?assigned=1' : ''
+    const data = await api.get(`/api/v1/projects${q}`)
     projects.value = data.projects || []
   } catch (e) {
     if (e.status === 401) return router.push('/login')
