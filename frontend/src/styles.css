@@ -80,3 +80,19 @@ button.ghost { background: #fff; color: #333; }
 .saved { color: #2e7d32; font-size: 11px; margin-left: 4px; }
 tr.row-needs_review { background: #fffdf5; }
 tr.row-approved     { background: #f4fbf4; }
+
+.assign-bar { display: flex; gap: 8px; align-items: center; margin: 8px 0 16px 0; }
+.assign-bar select { padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.muted { color: #888; }
+.review-panel { background: #fff; border: 1px solid #e0e0e0; padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+.review-panel h2 { margin-top: 0; font-size: 16px; }
+.review-text { padding: 6px 8px; border-radius: 4px; font-size: 13px; }
+.review-text.status-empty        { color: #999; font-style: italic; }
+.review-text.status-translated,
+.review-text.status-approved     { background: #e8f5e9; }
+.review-text.status-needs_review { background: #fff3e0; }
+.review-text.status-ai_draft     { background: #e3f2fd; }
+.approvals-panel { margin-top: 16px; border-top: 1px solid #eee; padding-top: 12px; }
+.review-form { margin-top: 10px; display: flex; gap: 8px; align-items: flex-start; }
+.review-form label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.review-form textarea { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 13px; }
