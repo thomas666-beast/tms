@@ -1,51 +1,43 @@
 <template>
-  <div class="container-wider">
-    <header>
-      <span>{{ auth.user?.name }}</span>
-      <button @click="onLogout">{{ t('nav.signOut') }}</button>
-    </header>
+  <div class="container-wide">
     <div class="row">
       <h1>{{ t('projects.title') }}</h1>
-      <button v-if="isAdmin" @click="createProject" class="primary">
-        {{ t('projects.newProject') }}
-      </button>
-    </div>
-
-    <div class="toolbar">
-      <input v-model="search" :placeholder="t('projects.search')" />
+      <div class="row-actions">
+        <input v-model="search" :placeholder="t('projects.search')" class="search-input" />
+        <button v-if="isAdmin" @click="createProject" class="primary">
+          {{ t('projects.newProject') }}
+        </button>
+      </div>
     </div>
 
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
-    <p v-else-if="filtered.length === 0">{{ t('projects.empty') }}</p>
+    <div v-else-if="filtered.length === 0" class="empty-block">
+      <p>{{ t('projects.empty') }}</p>
+    </div>
 
-    <table v-else class="table">
-      <thead>
-        <tr>
-          <th>{{ t('projects.columns.name') }}</th>
-          <th>{{ t('projects.columns.slug') }}</th>
-          <th>{{ t('projects.columns.sourceLang') }}</th>
-          <th>{{ t('projects.columns.members') }}</th>
-          <th>{{ t('projects.columns.created') }}</th>
-          <th>{{ t('projects.columns.role') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="p in filtered"
-          :key="p.id"
-          @click="openProject(p.id)"
-          class="clickable"
-        >
-          <td>{{ p.name }}</td>
-          <td><code>{{ p.slug }}</code></td>
-          <td>{{ p.default_source_lang }}</td>
-          <td>{{ p.members_count ?? '—' }}</td>
-          <td>{{ formatDate(p.created_at) }}</td>
-          <td>{{ p.member_role || '—' }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else class="card-grid">
+      <router-link
+        v-for="p in filtered"
+        :key="p.id"
+        :to="`/projects/${p.id}`"
+        class="project-card"
+      >
+        <div class="project-card-title">
+          <span class="project-name">{{ p.name }}</span>
+          <span v-if="p.member_role" class="badge">{{ p.member_role }}</span>
+        </div>
+        <div class="project-card-meta">
+          <code>{{ p.slug }}</code>
+          <span class="dot">·</span>
+          <span>{{ p.default_source_lang }}</span>
+        </div>
+        <div class="project-card-foot">
+          <span>{{ t('projects.columns.members') }}: {{ p.members_count ?? 0 }}</span>
+          <span>{{ formatDate(p.created_at) }}</span>
+        </div>
+      </router-link>
+    </div>
   </div>
 </template>
 
@@ -84,9 +76,7 @@ async function load() {
   } catch (e) {
     if (e.status === 401) return router.push('/login')
     error.value = e.message
-  } finally {
-    loading.value = false
-  }
+  } finally { loading.value = false }
 }
 
 async function createProject() {
@@ -100,13 +90,7 @@ async function createProject() {
   } catch (e) { error.value = e.message }
 }
 
-function openProject(id) { router.push(`/projects/${id}`) }
 function formatDate(iso) { return iso ? new Date(iso).toLocaleDateString() : '' }
-
-async function onLogout() {
-  await auth.logout()
-  router.push('/login')
-}
 
 onMounted(load)
 </script>

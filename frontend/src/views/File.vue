@@ -1,27 +1,28 @@
 <template>
   <div class="container-wide">
-    <header>
-      <span>{{ auth.user?.name }}</span>
-      <button @click="onLogout">{{ t('nav.signOut') }}</button>
-    </header>
-
-    <p>
+    <div class="crumbs">
       <router-link :to="projectLink">{{ t('files.detail.backToProject') }}</router-link>
-    </p>
+    </div>
 
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else-if="file">
-      <div class="row">
-        <h1>
-          {{ file.name }}
-          <small>
+      <div class="file-header">
+        <div>
+          <h1 class="file-title">{{ file.name }}</h1>
+          <div class="file-meta">
             <code>{{ file.format }}</code>
-            · {{ t('files.detail.sourceToTarget', { source: file.source_lang, target: file.target_lang }) }}
-            · <span class="badge">{{ file.status }}</span>
-          </small>
-        </h1>
+            <span class="dot">·</span>
+            <span>{{ t('files.detail.sourceToTarget', { source: file.source_lang, target: file.target_lang }) }}</span>
+            <span class="dot">·</span>
+            <span class="badge">{{ file.status }}</span>
+            <span v-if="revision" class="dot">·</span>
+            <span v-if="revision" class="muted small-text">
+              rev #{{ revision.revision_number }} · {{ revision.status }}
+            </span>
+          </div>
+        </div>
         <div class="row-actions">
           <a :href="`/api/v1/files/${file.id}/export`" class="btn-link" target="_blank">
             {{ t('files.detail.exportCurrent') }}
@@ -33,13 +34,13 @@
       </div>
 
       <div class="assign-bar">
-        <strong>{{ t('files.columns.assignedTo') }}:</strong>
-        <span v-if="file.assigned_to_name">{{ file.assigned_to_name }}</span>
+        <span class="assign-label">{{ t('files.columns.assignedTo') }}:</span>
+        <span v-if="file.assigned_to_name" class="assign-name">{{ file.assigned_to_name }}</span>
         <span v-else class="muted">{{ t('files.detail.unassigned') }}</span>
 
         <template v-if="canManageAssignment && !isInReview">
           <template v-if="assignableMembers.length">
-            <select v-model="assignChoice">
+            <select v-model="assignChoice" class="assign-select">
               <option value="">{{ t('files.detail.assignTo') }}…</option>
               <option v-for="m in assignableMembers" :key="m.user_id" :value="m.user_id">
                 {{ m.name }} ({{ m.role }})
@@ -58,12 +59,9 @@
       </div>
 
       <div class="workflow-bar">
-        <button v-if="canSubmit" @click="submit" :disabled="busy">
+        <button v-if="canSubmit" @click="submit" :disabled="busy" class="primary">
           {{ t('workflow.submit') }}
         </button>
-        <span v-if="revision" class="badge">
-          rev #{{ revision.revision_number }} · {{ revision.status }}
-        </span>
       </div>
 
       <div v-if="isInReview" class="review-panel">
@@ -71,9 +69,9 @@
         <table class="table-keys">
           <thead>
             <tr>
-              <th style="width: 30%;">{{ t('files.detail.colKey') }}</th>
-              <th style="width: 35%;">{{ t('files.detail.colSource') }}</th>
-              <th style="width: 25%;">{{ t('files.detail.colTranslation') }}</th>
+              <th style="width: 28%;">{{ t('files.detail.colKey') }}</th>
+              <th style="width: 34%;">{{ t('files.detail.colSource') }}</th>
+              <th style="width: 28%;">{{ t('files.detail.colTranslation') }}</th>
               <th style="width: 10%;">{{ t('files.detail.colStatus') }}</th>
             </tr>
           </thead>
@@ -127,9 +125,9 @@
         </div>
       </div>
 
-      <div class="toolbar">
+      <div class="editor-toolbar">
         <label>
-          {{ t('files.detail.filter') }}:
+          {{ t('files.detail.filter') }}
           <select v-model="filter" @change="reload">
             <option value="all">{{ t('files.detail.filterAll') }}</option>
             <option value="empty">{{ t('files.detail.filterEmpty') }}</option>
@@ -139,7 +137,7 @@
           </select>
         </label>
         <label>
-          {{ t('files.detail.search') }}:
+          {{ t('files.detail.search') }}
           <input v-model="search" placeholder="key or source" />
         </label>
         <button v-if="canAiBulk" @click="aiBulk" :disabled="busy">
@@ -147,40 +145,48 @@
         </button>
       </div>
 
-      <p v-if="keys.length === 0" class="muted">{{ t('files.detail.noKeys') }}</p>
+      <div v-if="keys.length === 0" class="empty-block">
+        <p>{{ t('files.detail.noKeys') }}</p>
+      </div>
 
-      <table v-else class="table-keys">
-        <thead>
-          <tr>
-            <th style="width: 18%;">{{ t('files.detail.colKey') }}</th>
-            <th style="width: 27%;">{{ t('files.detail.colSource') }}</th>
-            <th style="width: 35%;">{{ t('files.detail.colTranslation') }}</th>
-            <th style="width: 10%;">{{ t('files.detail.colStatus') }}</th>
-            <th style="width: 10%;">{{ t('files.detail.colActions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="k in visibleKeys" :key="k.id" :class="rowClass(k)">
-            <td><code>{{ k.key_path }}</code></td>
-            <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
-            <td>
-              <textarea v-model="draft[k.id].text" :disabled="!canEdit(k)" rows="2" class="translation-input"></textarea>
-              <input v-if="draft[k.id].status === 'needs_review'" v-model="draft[k.id].note"
-                class="note-input" :placeholder="t('files.detail.note')" :disabled="!canEdit(k)" />
-            </td>
-            <td>
-              <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
-                {{ statusLabel(k.translation?.status) }}
-              </span>
-            </td>
-            <td>
-              <button v-if="canEdit(k)" @click="save(k)" :disabled="busy" class="small">{{ t('files.detail.save') }}</button>
-              <button v-if="canEdit(k)" @click="aiOne(k)" :disabled="busy" class="small ghost">{{ t('files.detail.ai') }}</button>
-              <span v-if="draft[k.id].savedAt" class="saved">{{ t('files.detail.saved') }}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="editor-table-wrap">
+        <table class="table-keys">
+          <thead>
+            <tr>
+              <th style="width: 18%;">{{ t('files.detail.colKey') }}</th>
+              <th style="width: 27%;">{{ t('files.detail.colSource') }}</th>
+              <th style="width: 38%;">{{ t('files.detail.colTranslation') }}</th>
+              <th style="width: 9%;">{{ t('files.detail.colStatus') }}</th>
+              <th style="width: 8%;">{{ t('files.detail.colActions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="k in visibleKeys" :key="k.id" :class="rowClass(k)">
+              <td><code>{{ k.key_path }}</code></td>
+              <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
+              <td>
+                <textarea v-model="draft[k.id].text" :disabled="!canEdit(k)" rows="2" class="translation-input"></textarea>
+                <input v-if="draft[k.id].status === 'needs_review'" v-model="draft[k.id].note"
+                  class="note-input" :placeholder="t('files.detail.note')" :disabled="!canEdit(k)" />
+              </td>
+              <td>
+                <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
+                  {{ statusLabel(k.translation?.status) }}
+                </span>
+              </td>
+              <td class="row-actions-cell">
+                <button v-if="canEdit(k)" @click="save(k)" :disabled="busy" class="small">
+                  {{ t('files.detail.save') }}
+                </button>
+                <button v-if="canEdit(k)" @click="aiOne(k)" :disabled="busy" class="small ghost">
+                  {{ t('files.detail.ai') }}
+                </button>
+                <span v-if="draft[k.id].savedAt" class="saved">✓</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
   </div>
 </template>
@@ -414,11 +420,6 @@ function openFile(kind) {
   if (kind === 'export-approved') {
     window.open(`/api/v1/files/${file.value.id}/export?revision=latest_approved`, '_blank')
   }
-}
-
-async function onLogout() {
-  await auth.logout()
-  router.push('/login')
 }
 
 onMounted(load)

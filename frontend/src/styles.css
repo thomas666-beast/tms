@@ -532,3 +532,161 @@ tr.row-approved     { background: #f0fdf4; }
 
 /* sidebar replaces per-view headers */
 .shell .content > * > header:first-child { display: none; }
+
+/* ============================================================
+   Cards (projects list)
+   ============================================================ */
+.search-input { max-width: 320px; }
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.project-card {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  color: inherit;
+  text-decoration: none;
+  transition: box-shadow 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+.project-card:hover {
+  box-shadow: var(--shadow-l);
+  border-color: var(--border-2);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+.project-card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+.project-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.project-card-meta {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.project-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* ============================================================
+   File editor
+   ============================================================ */
+.crumbs { font-size: 13px; margin-bottom: 16px; }
+.crumbs a { color: var(--muted); }
+.crumbs a:hover { color: var(--accent); }
+
+.file-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.file-title {
+  font-size: 24px;
+  margin: 0 0 6px 0;
+}
+.file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+.small-text { font-size: 13px; }
+.dot { color: var(--border-2); }
+
+.assign-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0 16px 0;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.assign-label { font-size: 13px; color: var(--muted); }
+.assign-name  { font-weight: 500; }
+.assign-select { width: auto; min-width: 220px; }
+
+.editor-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+.editor-toolbar label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+}
+.editor-toolbar label > select,
+.editor-toolbar label > input {
+  width: auto;
+  min-width: 160px;
+  margin-top: 0;
+}
+
+.editor-table-wrap {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  border-radius: var(--radius);
+}
+.editor-table-wrap .table-keys thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.row-actions-cell {
+  white-space: nowrap;
+}
+.row-actions-cell button { margin-right: 4px; }
+.row-actions-cell .saved { font-weight: 700; }
+
+/* empty states */
+.empty-block {
+  padding: 48px 24px;
+  background: var(--surface);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius);
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+.empty-block p { margin: 0; }
