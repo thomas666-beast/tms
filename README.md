@@ -9,6 +9,7 @@ A team-based translation management tool for i18n files (Laravel, Vue, Symfony, 
 
 ## Status
 Early development — Task 0: project scaffolding.
+Schema v1 applied (`sql/001_schema.sql`).
 
 ## Local services
 Postgres runs via `docker/docker-compose.services.yml` (optional — any reachable PostgreSQL works).
