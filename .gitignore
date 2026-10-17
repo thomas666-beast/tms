@@ -22,3 +22,8 @@ dist/
 # Local DB dumps
 *.dump
 *.sql.gz
+
+# perltidy backups
+.bak/
+*.bak
+*.tdy

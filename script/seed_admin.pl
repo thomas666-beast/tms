@@ -16,7 +16,7 @@ use Authen::Passphrase::BlowfishCrypt;
 # ------------------------------------------------------------
 # CLI parsing
 # ------------------------------------------------------------
-my ($email, $name, $password, $role, $db_url);
+my ( $email, $name, $password, $role, $db_url );
 $role   = 'admin';
 $db_url = $ENV{DATABASE_URL};
 
@@ -30,7 +30,7 @@ GetOptions(
 
 usage() unless $email && $name && $password;
 
-unless ($role =~ /^(admin|lead_translator|translator)$/) {
+unless ( $role =~ /^(admin|lead_translator|translator)$/ ) {
   die "invalid --role '$role' (must be admin | lead_translator | translator)\n";
 }
 
@@ -76,7 +76,7 @@ $pg->db->query(
 );
 
 printf "%s user %s (id=%d, role=%s)\n",
-  ($row->{inserted} ? 'Created' : 'Updated'),
+  ( $row->{inserted} ? 'Created' : 'Updated' ),
   $email, $row->{id}, $role;
 
 exit 0;

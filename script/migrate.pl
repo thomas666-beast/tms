@@ -16,7 +16,7 @@ use Digest::SHA qw(sha256_hex);
 # ------------------------------------------------------------
 # CLI
 # ------------------------------------------------------------
-my ($db_url, $sql_dir);
+my ( $db_url, $sql_dir );
 $db_url  = $ENV{DATABASE_URL};
 $sql_dir = "$FindBin::Bin/../sql";
 
@@ -51,13 +51,13 @@ SQL
 # Load applied versions
 # ------------------------------------------------------------
 my %applied = map { $_->{version} => $_->{checksum} }
-              @{ $db->query('SELECT version, checksum FROM schema_migrations')->hashes };
+  @{ $db->query('SELECT version, checksum FROM schema_migrations')->hashes };
 
 # ------------------------------------------------------------
 # Discover files
 # ------------------------------------------------------------
 opendir my $dh, $sql_dir or die "cannot open $sql_dir: $!";
-my @files = sort grep { /\.sql$/ } readdir $dh;
+my @files = sort grep {/\.sql$/} readdir $dh;
 closedir $dh;
 
 die "no .sql files in $sql_dir\n" unless @files;
@@ -65,7 +65,7 @@ die "no .sql files in $sql_dir\n" unless @files;
 # ------------------------------------------------------------
 # Apply
 # ------------------------------------------------------------
-my ($applied_count, $skipped_count) = (0, 0);
+my ( $applied_count, $skipped_count ) = ( 0, 0 );
 
 for my $file (@files) {
   my $path = "$sql_dir/$file";
@@ -76,8 +76,8 @@ for my $file (@files) {
 
   my $checksum = sha256_hex($content);
 
-  if (exists $applied{$file}) {
-    if ($applied{$file} ne $checksum) {
+  if ( exists $applied{$file} ) {
+    if ( $applied{$file} ne $checksum ) {
       die "migration $file was already applied but its content has changed.\n"
         . "Migrations are immutable. Add a new file instead of editing this one.\n";
     }
@@ -90,10 +90,8 @@ for my $file (@files) {
   eval {
     $db->query('BEGIN');
     $db->query($content);
-    $db->query(
-      'INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)',
-      $file, $checksum,
-    );
+    $db->query( 'INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)',
+      $file, $checksum, );
     $db->query('COMMIT');
     1;
   } or do {

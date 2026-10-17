@@ -1,0 +1,18 @@
+# TMS perltidy configuration
+# -i=2 : 2-space indent (matches Mojolicious, current code)
+# -l=100: 100-column width
+# -b    : write in place, keep .bak
+# -bext : where .bak files go
+
+-l=100
+-i=2
+-ci=2
+-vt=2
+-cti=0
+-pt=1
+-bt=1
+-sbt=1
+-bbt=1
+-nsfs
+-nolq
+-wls='= + - * / x % ** << >> & | ^ . .. ...'

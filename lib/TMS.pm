@@ -4,6 +4,7 @@ use Mojo::Base 'Mojolicious', -signatures;
 use Dotenv;
 
 sub startup ($self) {
+
   # ------------------------------------------------------------
   # Load .env
   # ------------------------------------------------------------
@@ -13,7 +14,7 @@ sub startup ($self) {
   # ------------------------------------------------------------
   # App metadata + secrets
   # ------------------------------------------------------------
-  $self->secrets([ $ENV{TMS_SECRET} // 'dev-only-change-me' ]);
+  $self->secrets( [ $ENV{TMS_SECRET} // 'dev-only-change-me' ] );
 
   $self->{app_name}    = 'TMS';
   $self->{app_version} = '0.0.1';

@@ -17,10 +17,10 @@ use URI::QueryParam;
 # ------------------------------------------------------------
 # CLI
 # ------------------------------------------------------------
-my ($db_url, $admin_url, $email, $name, $password, $skip_seed);
-$db_url = $ENV{DATABASE_URL};
-$email  = $ENV{TMS_DEV_ADMIN_EMAIL}    // 'admin@example.com';
-$name   = $ENV{TMS_DEV_ADMIN_NAME}     // 'Root Admin';
+my ( $db_url, $admin_url, $email, $name, $password, $skip_seed );
+$db_url   = $ENV{DATABASE_URL};
+$email    = $ENV{TMS_DEV_ADMIN_EMAIL} // 'admin@example.com';
+$name     = $ENV{TMS_DEV_ADMIN_NAME}  // 'Root Admin';
 $password = $ENV{TMS_DEV_ADMIN_PASSWORD};
 
 GetOptions(
@@ -37,12 +37,12 @@ die "DATABASE_URL is not set (check .env or pass --db)\n"
 
 die "admin password is not set (set TMS_DEV_ADMIN_PASSWORD in .env, "
   . "or pass --admin-password)\n"
-  unless $skip_seed || (defined $password && length $password);
+  unless $skip_seed || ( defined $password && length $password );
 
 # ------------------------------------------------------------
 # Derive admin URL if not passed: swap db name to `postgres`
 # ------------------------------------------------------------
-unless (defined $admin_url && length $admin_url) {
+unless ( defined $admin_url && length $admin_url ) {
   my $uri = URI->new($db_url);
   $uri->path('/postgres');
   $admin_url = $uri->as_string;
@@ -51,8 +51,8 @@ unless (defined $admin_url && length $admin_url) {
 # ------------------------------------------------------------
 # Parse DB name from DATABASE_URL
 # ------------------------------------------------------------
-my $uri      = URI->new($db_url);
-my $db_name  = ($uri->path_segments)[-1] // '';
+my $uri     = URI->new($db_url);
+my $db_name = ( $uri->path_segments )[-1] // '';
 die "could not parse database name from DATABASE_URL\n" unless length $db_name;
 
 die "refusing to reset the maintenance database 'postgres'\n"
@@ -83,17 +83,15 @@ print "  recreated\n";
 # Apply migrations
 # ------------------------------------------------------------
 print "Applying migrations …\n";
-system(
-  $^X, "$FindBin::Bin/migrate.pl",
-  '--db' => $db_url,
-) == 0 or die "migrate.pl failed\n";
+system( $^X, "$FindBin::Bin/migrate.pl", '--db' => $db_url, ) == 0 or die "migrate.pl failed\n";
 
 # ------------------------------------------------------------
 # Seed admin
 # ------------------------------------------------------------
 if ($skip_seed) {
   print "Skipping admin seed (--skip-seed).\n";
-} else {
+}
+else {
   print "Seeding admin $email …\n";
   system(
     $^X, "$FindBin::Bin/seed_admin.pl",
