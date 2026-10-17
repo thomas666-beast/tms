@@ -1,5 +1,5 @@
 <template>
-  <div class="container">
+  <div class="container-wider">
     <header>
       <span>{{ auth.user?.name }}</span>
       <button @click="onLogout">{{ t('nav.signOut') }}</button>

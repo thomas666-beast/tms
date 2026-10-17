@@ -1,5 +1,9 @@
 <template>
-  <div class="container">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="brand-mark">T</span>
+      <span class="brand-name">{{ t('app.name') }}</span>
+    </div>
     <h1>{{ t('login.title') }}</h1>
     <form @submit.prevent="submit">
       <label>
@@ -10,7 +14,7 @@
         {{ t('login.password') }}
         <input v-model="password" type="password" required autocomplete="current-password" />
       </label>
-      <button type="submit" :disabled="busy">
+      <button type="submit" :disabled="busy" class="primary">
         {{ busy ? t('login.busy') : t('login.submit') }}
       </button>
       <p v-if="error" class="error">{{ error }}</p>

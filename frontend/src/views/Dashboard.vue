@@ -1,23 +1,13 @@
 <template>
   <div class="container-wide">
-    <header>
-      <span>{{ auth.user?.name }} <small>({{ auth.user?.role }})</small></span>
-      <button @click="onLogout">{{ t('nav.signOut') }}</button>
-    </header>
-
     <div class="row">
       <h1>{{ t('dashboard.title') }}</h1>
-      <div class="row-actions">
-        <router-link to="/projects" class="btn-link">{{ t('nav.projects') }}</router-link>
-        <router-link v-if="isAdmin" to="/users" class="btn-link">{{ t('nav.users') }}</router-link>
-      </div>
     </div>
 
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else>
-      <!-- Assigned -->
       <section class="panel">
         <h2>{{ t('dashboard.assignedTitle') }}</h2>
         <p v-if="!assigned.length" class="muted">{{ t('dashboard.assignedEmpty') }}</p>
@@ -41,7 +31,6 @@
         </table>
       </section>
 
-      <!-- Reviewable -->
       <section class="panel">
         <h2>{{ t('dashboard.reviewableTitle') }}</h2>
         <p v-if="!reviewable.length" class="muted">{{ t('dashboard.reviewableEmpty') }}</p>
@@ -65,7 +54,6 @@
         </table>
       </section>
 
-      <!-- Recent approved -->
       <section class="panel">
         <h2>{{ t('dashboard.recentTitle') }}</h2>
         <p v-if="!recent_approved.length" class="muted">{{ t('dashboard.recentEmpty') }}</p>
@@ -91,14 +79,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '../stores/auth'
 import { api } from '../api'
 
 const { t } = useI18n()
-const auth = useAuthStore()
 const router = useRouter()
 
 const assigned = ref([])
@@ -106,8 +92,6 @@ const reviewable = ref([])
 const recent_approved = ref([])
 const loading = ref(true)
 const error = ref('')
-
-const isAdmin = computed(() => auth.user?.role === 'admin')
 
 async function load() {
   loading.value = true
@@ -123,14 +107,7 @@ async function load() {
   } finally { loading.value = false }
 }
 
-function openFile(id) {
-  router.push(`/files/${id}`)
-}
-
-async function onLogout() {
-  await auth.logout()
-  router.push('/login')
-}
+function openFile(id) { router.push(`/files/${id}`) }
 
 onMounted(load)
 </script>
