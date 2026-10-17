@@ -4,6 +4,7 @@ export default {
   login: {
     title: 'Sign in', email: 'Email', password: 'Password',
     submit: 'Sign in', busy: 'Signing in…',
+    forgot: 'Forgot your password? Contact your administrator.',
   },
   dashboard: {
     title: 'Dashboard', emptyState: 'Nothing here yet.', goToProjects: 'Go to projects →',
@@ -15,6 +16,9 @@ export default {
     recentEmpty: 'No approved files yet.',
     notificationsTitle: 'Recent notifications',
     notificationsEmpty: 'No notifications yet.',
+    gettingStartedTitle: 'Get started',
+    gettingStartedBody: 'You don\'t have any projects yet. Create your first project to start translating.',
+    gettingStartedCta: 'Create your first project →',
     columns: {
       name: 'File', project: 'Project', target: 'Target', status: 'Status', approvals: 'Approvals',
     },

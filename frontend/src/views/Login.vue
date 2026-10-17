@@ -18,6 +18,7 @@
         {{ busy ? t('login.busy') : t('login.submit') }}
       </button>
       <p v-if="error" class="error">{{ error }}</p>
+      <p class="login-forgot">{{ t('login.forgot') }}</p>
     </form>
   </div>
 </template>

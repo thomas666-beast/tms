@@ -8,6 +8,14 @@
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else>
+      <div v-if="showGettingStarted" class="getting-started">
+        <h2>{{ t('dashboard.gettingStartedTitle') }}</h2>
+        <p>{{ t('dashboard.gettingStartedBody') }}</p>
+        <router-link to="/projects" class="btn-link" style="display:inline-block; margin-top:8px;">
+          {{ t('dashboard.gettingStartedCta') }}
+        </router-link>
+      </div>
+
       <section class="panel">
         <h2>{{ t('dashboard.notificationsTitle') }}</h2>
         <p v-if="!notifs.items.length" class="muted">{{ t('dashboard.notificationsEmpty') }}</p>
@@ -90,13 +98,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../stores/auth'
 import { api } from '../api'
 import { useNotificationsStore } from '../stores/notifications'
 
 const { t } = useI18n()
+const auth = useAuthStore()
 const router = useRouter()
 const notifs = useNotificationsStore()
 
@@ -105,6 +115,15 @@ const reviewable = ref([])
 const recent_approved = ref([])
 const loading = ref(true)
 const error = ref('')
+
+const isAdmin = computed(() => auth.user?.role === 'admin')
+const showGettingStarted = computed(() => {
+  if (!isAdmin.value) return false
+  return assigned.value.length === 0
+      && reviewable.value.length === 0
+      && recent_approved.value.length === 0
+      && notifs.items.length === 0
+})
 
 async function load() {
   loading.value = true

@@ -927,3 +927,32 @@ tr.inactive td { color: var(--muted); }
 .notif-item:last-child { border-bottom: none; }
 .notif-item:hover { color: var(--accent); }
 .notif-type { font-weight: 500; }
+
+/* ============================================================
+   Login extra + getting started
+   ============================================================ */
+.login-forgot {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.getting-started {
+  background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+}
+.getting-started h2 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  color: #3730a3;
+}
+.getting-started p {
+  margin: 0;
+  color: #4338ca;
+  font-size: 14px;
+}
