@@ -9,6 +9,17 @@
 
     <template v-else>
       <section class="panel">
+        <h2>{{ t('dashboard.notificationsTitle') }}</h2>
+        <p v-if="!notifs.items.length" class="muted">{{ t('dashboard.notificationsEmpty') }}</p>
+        <ul v-else class="notif-list">
+          <li v-for="n in notifs.items.slice(0, 5)" :key="n.id" class="notif-item" @click="openNotif(n)">
+            <span class="notif-type">{{ t('notifications.types.' + n.type) }}</span>
+            <span v-if="n.payload.project_name" class="muted">— {{ n.payload.project_name }}</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel">
         <h2>{{ t('dashboard.assignedTitle') }}</h2>
         <p v-if="!assigned.length" class="muted">{{ t('dashboard.assignedEmpty') }}</p>
         <table v-else class="table">
@@ -83,9 +94,11 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
+import { useNotificationsStore } from '../stores/notifications'
 
 const { t } = useI18n()
 const router = useRouter()
+const notifs = useNotificationsStore()
 
 const assigned = ref([])
 const reviewable = ref([])
@@ -108,6 +121,11 @@ async function load() {
 }
 
 function openFile(id) { router.push(`/files/${id}`) }
+
+async function openNotif(n) {
+  try { await notifs.markRead(n.id) } catch (_) {}
+  if (n.entity_type === 'file' && n.entity_id) router.push(`/files/${n.entity_id}`)
+}
 
 onMounted(load)
 </script>

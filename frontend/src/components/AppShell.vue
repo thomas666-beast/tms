@@ -28,24 +28,34 @@
     </aside>
 
     <main class="content">
+      <div class="content-topbar">
+        <NotificationsBell />
+      </div>
       <slot />
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { useNotificationsStore } from '../stores/notifications'
+import NotificationsBell from './NotificationsBell.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const router = useRouter()
+const notifs = useNotificationsStore()
 const isAdmin = computed(() => auth.user?.role === 'admin')
 
 async function onLogout() {
+  notifs.stopPolling()
   await auth.logout()
   router.push('/login')
 }
+
+onMounted(() => notifs.startPolling())
+onUnmounted(() => notifs.stopPolling())
 </script>
