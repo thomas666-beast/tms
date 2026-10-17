@@ -96,3 +96,15 @@ tr.row-approved     { background: #f4fbf4; }
 .review-form { margin-top: 10px; display: flex; gap: 8px; align-items: flex-start; }
 .review-form label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .review-form textarea { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 13px; }
+
+.form-box {
+  background: #fff; border: 1px solid #e0e0e0; padding: 14px 16px;
+  border-radius: 8px; margin: 12px 0 20px 0;
+}
+.form-box h3 { margin-top: 0; font-size: 15px; }
+.form-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;
+}
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.form-grid input, .form-grid select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+tr.inactive td { color: #999; }

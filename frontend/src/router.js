@@ -7,6 +7,7 @@ const routes = [
   { path: '/projects', name: 'projects', component: () => import('./views/Projects.vue') },
   { path: '/projects/:id', name: 'project', component: () => import('./views/Project.vue') },
   { path: '/files/:id', name: 'file', component: () => import('./views/File.vue') },
+  { path: '/users', name: 'users', component: () => import('./views/Users.vue'), meta: { admin: true } },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 
@@ -22,6 +23,7 @@ router.beforeEach((to) => {
     return true
   }
   if (!auth.user) return { name: 'login', query: { next: to.fullPath } }
+  if (to.meta.admin && auth.user.role !== 'admin') return { name: 'dashboard' }
   return true
 })
 

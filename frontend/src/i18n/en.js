@@ -1,6 +1,6 @@
 export default {
   app: { name: 'TMS' },
-  nav: { dashboard: 'Dashboard', projects: 'Projects', signOut: 'Sign out' },
+  nav: { dashboard: 'Dashboard', projects: 'Projects', users: 'Users', signOut: 'Sign out' },
   login: {
     title: 'Sign in', email: 'Email', password: 'Password',
     submit: 'Sign in', busy: 'Signing in…',
@@ -51,12 +51,33 @@ export default {
     confirmReject: 'Reject this revision? A new revision will open.',
     confirmSubmit: 'Submit for review?',
     reviewPanel: 'Review',
-    approveComment: 'Comment (optional)',
-    rejectComment: 'Comment (required)',
-    approveSuccess: 'Approved.',
-    rejectSuccess: 'Rejected. A new revision has opened.',
+    approveComment: 'Comment (optional)', rejectComment: 'Comment (required)',
+    approveSuccess: 'Approved.', rejectSuccess: 'Rejected. A new revision has opened.',
   },
   members: { role: { admin: 'admin', lead: 'lead', translator: 'translator' } },
+  users: {
+    title: 'Users',
+    newUser: '+ New user',
+    columns: {
+      email: 'Email', name: 'Name', role: 'Role', active: 'Active', created: 'Created', actions: 'Actions',
+    },
+    create: {
+      title: 'New user',
+      email: 'Email', name: 'Name', password: 'Password', role: 'Role',
+      submit: 'Create user', cancel: 'Cancel',
+    },
+    edit: {
+      title: 'Edit user',
+      save: 'Save', cancel: 'Cancel',
+    },
+    resetPassword: 'Reset password',
+    resetPasswordTitle: 'New password',
+    resetPasswordSubmit: 'Set password',
+    yes: 'yes',
+    no: 'no',
+    confirmDeactivateSelf: 'You cannot deactivate yourself.',
+    roles: { admin: 'admin', lead_translator: 'lead_translator', translator: 'translator' },
+  },
   common: {
     loading: 'Loading…', error: 'Something went wrong.',
     forbidden: 'You do not have access.', cancel: 'Cancel',

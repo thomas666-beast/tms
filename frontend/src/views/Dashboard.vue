@@ -6,8 +6,10 @@
     </header>
     <h1>{{ t('dashboard.title') }}</h1>
     <p>
-      {{ t('dashboard.emptyState') }}
-      <router-link to="/projects">{{ t('dashboard.goToProjects') }}</router-link>
+      <router-link to="/projects">{{ t('nav.projects') }}</router-link>
+      <template v-if="auth.user?.role === 'admin'">
+        · <router-link to="/users">{{ t('nav.users') }}</router-link>
+      </template>
     </p>
   </div>
 </template>
