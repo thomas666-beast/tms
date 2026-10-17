@@ -21,6 +21,9 @@ requires 'Crypt::Eksblowfish';   # bcrypt backend
 # --- JSON ---
 requires 'JSON::XS';
 
+# --- ENV ---
+requires 'Dotenv';
+
 # --- dev / test ---
 on 'develop' => sub {
     requires 'Test::More';
