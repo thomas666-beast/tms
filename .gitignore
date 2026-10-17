@@ -27,3 +27,8 @@ dist/
 .bak/
 *.bak
 *.tdy
+
+# frontend
+/frontend/node_modules/
+/frontend/dist/
+/public/app/

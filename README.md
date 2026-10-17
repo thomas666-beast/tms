@@ -55,6 +55,22 @@ Authenticated (any logged-in user):
 - `POST   /api/v1/files/:id/approve`         (project lead, project admin, global admin; not the file's assigned translator)
 - `POST   /api/v1/files/:id/reject`          (same; requires `comment`)
 - `GET    /api/v1/files/:id/approvals`
+- `POST   /api/v1/files/:id/assign`          (project admin, global admin; body: `user_id`)
+- `POST   /api/v1/files/:id/unassign`        (project admin, global admin)
+- `GET    /api/v1/notifications?unread=1`
+- `POST   /api/v1/notifications/read_all`
+- `POST   /api/v1/notifications/:id/read`
+- `GET    /api/v1/files/:id/export?revision=current|latest_approved` (returns the file in its original format)
 
 ## Local services
 Postgres runs via `docker/docker-compose.services.yml` (optional — any reachable PostgreSQL works).
+
+## Frontend (dev)
+
+    cd frontend
+    npm install
+    npm run dev      # http://localhost:5173, proxies /api to :3000
+
+Backend must be running: `carton exec -- morbo script/tms`.
+
+Production build (`npm run build`) writes to `public/app/` — backend static serving is added in a later task.
