@@ -1,0 +1,34 @@
+# ============================================================
+# TMS — local services (optional)
+# ============================================================
+# You do NOT need Docker to run the app. But for local dev,
+# it's the fastest way to get Postgres (and later Redis,
+# LibreTranslate) running.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.services.yml up -d postgres
+#   docker compose -f docker/docker-compose.services.yml logs -f postgres
+#   docker compose -f docker/docker-compose.services.yml down
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tms-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     tms
+      POSTGRES_PASSWORD: tms
+      POSTGRES_DB:       tms
+    ports:
+      - "5432:5432"
+    volumes:
+      - tms_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tms -d tms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  tms_pgdata:
