@@ -32,27 +32,31 @@
         </div>
       </div>
 
-      <!-- Assignment -->
       <div class="assign-bar">
         <strong>{{ t('files.columns.assignedTo') }}:</strong>
         <span v-if="file.assigned_to_name">{{ file.assigned_to_name }}</span>
         <span v-else class="muted">{{ t('files.detail.unassigned') }}</span>
 
         <template v-if="canManageAssignment && !isInReview">
-          <select v-model="assignChoice">
-            <option value="">{{ t('files.detail.assignTo') }}…</option>
-            <option v-for="m in assignableMembers" :key="m.user_id" :value="m.user_id">
-              {{ m.name }} ({{ m.role }})
-            </option>
-          </select>
-          <button @click="assign" :disabled="!assignChoice || busy" class="small">→</button>
+          <template v-if="assignableMembers.length">
+            <select v-model="assignChoice">
+              <option value="">{{ t('files.detail.assignTo') }}…</option>
+              <option v-for="m in assignableMembers" :key="m.user_id" :value="m.user_id">
+                {{ m.name }} ({{ m.role }})
+              </option>
+            </select>
+            <button @click="assign" :disabled="!assignChoice || busy" class="small">→</button>
+          </template>
+          <template v-else>
+            <span class="muted">{{ t('files.detail.needMember') }}</span>
+            <router-link :to="projectLink + '#members'">{{ t('files.detail.goToMembers') }}</router-link>
+          </template>
           <button v-if="file.assigned_to_user_id" @click="unassign" :disabled="busy" class="small ghost">
             {{ t('files.detail.clearAssign') }}
           </button>
         </template>
       </div>
 
-      <!-- Workflow actions -->
       <div class="workflow-bar">
         <button v-if="canSubmit" @click="submit" :disabled="busy">
           {{ t('workflow.submit') }}
@@ -62,7 +66,6 @@
         </span>
       </div>
 
-      <!-- Review panel -->
       <div v-if="isInReview" class="review-panel">
         <h2>{{ t('workflow.reviewPanel') }}</h2>
         <table class="table-keys">
@@ -124,7 +127,6 @@
         </div>
       </div>
 
-      <!-- Toolbar -->
       <div class="toolbar">
         <label>
           {{ t('files.detail.filter') }}:
@@ -145,7 +147,9 @@
         </button>
       </div>
 
-      <table class="table-keys">
+      <p v-if="keys.length === 0" class="muted">{{ t('files.detail.noKeys') }}</p>
+
+      <table v-else class="table-keys">
         <thead>
           <tr>
             <th style="width: 18%;">{{ t('files.detail.colKey') }}</th>
@@ -224,7 +228,6 @@ const isInReview = computed(() => revision.value?.status === 'in_review')
 const revisionOpen = computed(() => revision.value?.status === 'open')
 
 const canManageAssignment = computed(() => isProjectAdmin.value)
-
 const assignableMembers = computed(() =>
   members.value.filter(m => m.role === 'translator' || m.role === 'lead'))
 
@@ -246,6 +249,14 @@ const visibleKeys = computed(() => {
 })
 function rowClass(k) { return `row-${k.translation?.status || 'empty'}` }
 function statusLabel(s) { return t(`files.status.${s || 'empty'}`) }
+
+function errMsg(e) {
+  const code = e?.data?.error
+  if (code && t(`workflow.errors.${code}`) !== `workflow.errors.${code}`) {
+    return t(`workflow.errors.${code}`)
+  }
+  return e.message
+}
 
 async function load() {
   loading.value = true
@@ -312,7 +323,7 @@ async function assign() {
     await api.post(`/api/v1/files/${file.value.id}/assign`, { user_id: Number(assignChoice.value) })
     assignChoice.value = ''
     await load()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -322,7 +333,7 @@ async function unassign() {
   try {
     await api.post(`/api/v1/files/${file.value.id}/unassign`)
     await load()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -340,7 +351,7 @@ async function save(k) {
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
     draft[k.id].savedAt = Date.now()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -353,7 +364,7 @@ async function aiOne(k) {
     draft[k.id].text = data.translation.text || ''
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -364,7 +375,7 @@ async function aiBulk() {
     const data = await api.post(`/api/v1/files/${file.value.id}/ai_translate`, { engine: 'libretranslate' })
     await reload()
     alert(`Translated ${data.translated}, needs review ${data.needs_review}, errors ${data.errors}`)
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -374,7 +385,7 @@ async function submit() {
   try {
     await api.post(`/api/v1/files/${file.value.id}/submit`)
     await load()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -384,7 +395,7 @@ async function approve() {
     await api.post(`/api/v1/files/${file.value.id}/approve`, { comment: approveComment.value || undefined })
     approveComment.value = ''
     await load()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
@@ -395,7 +406,7 @@ async function reject() {
     await api.post(`/api/v1/files/${file.value.id}/reject`, { comment: rejectComment.value })
     rejectComment.value = ''
     await load()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 

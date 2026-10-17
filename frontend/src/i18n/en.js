@@ -52,6 +52,9 @@ export default {
       exportCurrent: 'Export (current)', exportApproved: 'Export (approved)',
       emptyCell: '—',
       assignTo: 'Assign to', clearAssign: 'Clear',
+      noKeys: 'This file has no translation keys.',
+      needMember: 'Add a translator to this project first.',
+      goToMembers: 'Go to project members →',
     },
     status: {
       empty: 'empty', ai_draft: 'AI draft', translated: 'translated',
@@ -69,6 +72,12 @@ export default {
     reviewPanel: 'Review',
     approveComment: 'Comment (optional)', rejectComment: 'Comment (required)',
     approveSuccess: 'Approved.', rejectSuccess: 'Rejected. A new revision has opened.',
+    errors: {
+      cannot_approve_own_work: 'You cannot approve a file assigned to you.',
+      already_decided: 'You have already decided on this revision.',
+      not_in_review: 'This revision is not in review.',
+      forbidden: 'You do not have permission for this action.',
+    },
   },
   members: { role: { admin: 'admin', lead: 'lead', translator: 'translator' } },
   users: {
