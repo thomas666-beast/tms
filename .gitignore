@@ -1,0 +1,25 @@
+# Perl / Carton
+/local/
+/.build/
+carton.lock.bak
+*.swp
+*.swo
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Env
+.env
+.env.local
+
+# Node (will be used later for Vue)
+node_modules/
+dist/
+
+# Local DB dumps
+*.dump
+*.sql.gz
+
