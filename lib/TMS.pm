@@ -19,6 +19,11 @@ sub startup ($self) {
   $self->{app_version} = '0.0.1';
 
   # ------------------------------------------------------------
+  # Plugins
+  # ------------------------------------------------------------
+  $self->plugin('TMS::Plugin::DB');
+
+  # ------------------------------------------------------------
   # Routes
   # ------------------------------------------------------------
   my $r = $self->routes;
@@ -32,10 +37,25 @@ sub startup ($self) {
   });
 
   $r->get('/api/v1/health')->to(cb => sub ($c) {
+    my $db_status = 'ok';
+    my $db_error;
+
+    eval {
+      my $row = $c->db->query('SELECT 1 AS ok')->hash;
+      die 'unexpected result' unless $row && $row->{ok} == 1;
+      1;
+    } or do {
+      $db_status = 'error';
+      $db_error  = $@ || 'unknown error';
+      chomp $db_error;
+    };
+
     $c->render(json => {
       status  => 'ok',
       app     => $self->{app_name},
       version => $self->{app_version},
+      db      => $db_status,
+      (defined $db_error ? (db_error => $db_error) : ()),
       time    => time,
     });
   });
