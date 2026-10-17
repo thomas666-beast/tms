@@ -1,16 +1,25 @@
 <template>
-  <div class="container-wider">
-    <header>
-      <span>{{ auth.user?.name }}</span>
-      <button @click="onLogout">{{ t('nav.signOut') }}</button>
-    </header>
-    <p><router-link to="/projects">{{ t('projects.back') }}</router-link></p>
+  <div class="container-wide">
+    <div class="crumbs">
+      <router-link to="/projects">{{ t('projects.back') }}</router-link>
+    </div>
 
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else-if="project">
-      <h1>{{ project.name }} <small>({{ project.default_source_lang }})</small></h1>
+      <div class="file-header">
+        <div>
+          <h1 class="file-title">{{ project.name }}</h1>
+          <div class="file-meta">
+            <code>{{ project.slug }}</code>
+            <span class="dot">·</span>
+            <span>{{ t('projects.columns.sourceLang') }}: {{ project.default_source_lang }}</span>
+            <span class="dot">·</span>
+            <span>{{ t('projects.columns.members') }}: {{ members.length }}</span>
+          </div>
+        </div>
+      </div>
 
       <div class="row">
         <h2>{{ t('projects.members') }}</h2>
@@ -44,52 +53,74 @@
           <button @click="addMember" :disabled="!newMember.user_id || busy" class="primary">
             {{ t('projects.addMemberSubmit') }}
           </button>
-          <button @click="cancelAddMember" class="btn-link">{{ t('common.cancel') }}</button>
+          <button @click="cancelAddMember" class="ghost">{{ t('common.cancel') }}</button>
         </div>
       </div>
 
-      <ul class="list">
-        <li v-for="m in members" :key="m.user_id">
-          {{ m.name }} <small>&lt;{{ m.email }}&gt;</small>
-          — <span class="badge">{{ m.role }}</span>
-          <button
-            v-if="canManageMembers && m.user_id !== auth.user?.id"
-            @click="removeMember(m.user_id)"
-            class="small ghost"
-          >{{ t('projects.removeMember') }}</button>
-        </li>
-      </ul>
+      <div v-if="members.length === 0" class="empty-block">
+        <p>{{ t('projects.empty') }}</p>
+      </div>
+      <div v-else class="table-card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{{ t('projects.memberUser') }}</th>
+              <th>{{ t('users.columns.email') }}</th>
+              <th>{{ t('projects.memberRole') }}</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in members" :key="m.user_id">
+              <td>{{ m.name }}</td>
+              <td class="muted">{{ m.email }}</td>
+              <td><span class="badge" :class="'role-' + m.role">{{ m.role }}</span></td>
+              <td class="row-actions-cell">
+                <button
+                  v-if="canManageMembers && m.user_id !== auth.user?.id"
+                  @click="removeMember(m.user_id)"
+                  class="small ghost"
+                >{{ t('projects.removeMember') }}</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-      <div class="row">
+      <div class="row" style="margin-top: 32px;">
         <h2>{{ t('projects.files') }}</h2>
-        <button v-if="canManageFiles" @click="upload" :disabled="uploading">
+        <button v-if="canManageFiles" @click="upload" :disabled="uploading" class="primary">
           {{ uploading ? t('files.uploading') : t('files.upload') }}
         </button>
       </div>
 
-      <p v-if="files.length === 0">{{ t('files.empty') }}</p>
-      <table v-else class="table">
-        <thead>
-          <tr>
-            <th>{{ t('files.columns.name') }}</th>
-            <th>{{ t('files.columns.format') }}</th>
-            <th>{{ t('files.columns.target') }}</th>
-            <th>{{ t('files.columns.status') }}</th>
-            <th>{{ t('files.columns.assignedTo') }}</th>
-            <th>{{ t('files.columns.keys') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="f in files" :key="f.id" class="clickable" @click="openFile(f.id)">
-            <td>{{ f.name }}</td>
-            <td><code>{{ f.format }}</code></td>
-            <td>{{ f.target_lang }}</td>
-            <td>{{ f.status }}</td>
-            <td>{{ f.assigned_to_name || t('files.unassigned') }}</td>
-            <td>{{ f.keys_count }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="files.length === 0" class="empty-block">
+        <p>{{ t('files.empty') }}</p>
+      </div>
+      <div v-else class="table-card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{{ t('files.columns.name') }}</th>
+              <th>{{ t('files.columns.format') }}</th>
+              <th>{{ t('files.columns.target') }}</th>
+              <th>{{ t('files.columns.status') }}</th>
+              <th>{{ t('files.columns.assignedTo') }}</th>
+              <th>{{ t('files.columns.keys') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="f in files" :key="f.id" class="clickable" @click="openFile(f.id)">
+              <td>{{ f.name }}</td>
+              <td><code>{{ f.format }}</code></td>
+              <td>{{ f.target_lang }}</td>
+              <td><span class="badge">{{ f.status }}</span></td>
+              <td>{{ f.assigned_to_name || t('files.unassigned') }}</td>
+              <td>{{ f.keys_count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
   </div>
 </template>
@@ -143,9 +174,7 @@ async function load() {
     if (e.status === 403) error.value = t('common.forbidden')
     else if (e.status === 404) error.value = t('projects.notFound')
     else error.value = e.message
-  } finally {
-    loading.value = false
-  }
+  } finally { loading.value = false }
 }
 
 async function startAddMember() {
@@ -222,11 +251,6 @@ async function upload() {
     finally { uploading.value = false }
   }
   input.click()
-}
-
-async function onLogout() {
-  await auth.logout()
-  router.push('/login')
 }
 
 onMounted(load)

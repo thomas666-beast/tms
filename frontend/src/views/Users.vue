@@ -1,10 +1,5 @@
 <template>
   <div class="container-wide">
-    <header>
-      <span>{{ auth.user?.name }}</span>
-      <button @click="onLogout">{{ t('nav.signOut') }}</button>
-    </header>
-
     <div class="row">
       <h1>{{ t('users.title') }}</h1>
       <button @click="startCreate" class="primary">{{ t('users.newUser') }}</button>
@@ -14,7 +9,6 @@
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else>
-      <!-- create form -->
       <div v-if="creating" class="form-box">
         <h3>{{ t('users.create.title') }}</h3>
         <div class="form-grid">
@@ -32,83 +26,86 @@
         </div>
         <div class="row-actions">
           <button @click="createUser" :disabled="busy" class="primary">{{ t('users.create.submit') }}</button>
-          <button @click="cancelCreate" class="btn-link">{{ t('users.create.cancel') }}</button>
+          <button @click="cancelCreate" class="ghost">{{ t('users.create.cancel') }}</button>
         </div>
       </div>
 
-      <table class="table">
-        <thead>
-          <tr>
-            <th>{{ t('users.columns.email') }}</th>
-            <th>{{ t('users.columns.name') }}</th>
-            <th>{{ t('users.columns.role') }}</th>
-            <th>{{ t('users.columns.active') }}</th>
-            <th>{{ t('users.columns.created') }}</th>
-            <th>{{ t('users.columns.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template v-for="u in users" :key="u.id">
-            <tr :class="{ inactive: !u.is_active }">
-              <td>{{ u.email }}</td>
-              <td>
-                <span v-if="editingId !== u.id">{{ u.name }}</span>
-                <input v-else v-model="editDraft.name" />
-              </td>
-              <td>
-                <span v-if="editingId !== u.id"><code>{{ u.role }}</code></span>
-                <select v-else v-model="editDraft.role">
-                  <option value="translator">{{ t('users.roles.translator') }}</option>
-                  <option value="lead_translator">{{ t('users.roles.lead_translator') }}</option>
-                  <option value="admin">{{ t('users.roles.admin') }}</option>
-                </select>
-              </td>
-              <td>
-                <span v-if="editingId !== u.id">{{ u.is_active ? t('users.yes') : t('users.no') }}</span>
-                <input v-else type="checkbox" v-model="editDraft.is_active" />
-              </td>
-              <td>{{ formatDate(u.created_at) }}</td>
-              <td>
-                <template v-if="editingId === u.id">
-                  <button @click="saveEdit(u)" :disabled="busy" class="small primary">{{ t('users.edit.save') }}</button>
-                  <button @click="cancelEdit" class="small btn-link">{{ t('users.edit.cancel') }}</button>
-                </template>
-                <template v-else>
-                  <button @click="startEdit(u)" class="small">{{ t('users.edit.title') }}</button>
-                  <button @click="startReset(u)" class="small ghost">{{ t('users.resetPassword') }}</button>
-                </template>
-              </td>
+      <div class="table-card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{{ t('users.columns.email') }}</th>
+              <th>{{ t('users.columns.name') }}</th>
+              <th>{{ t('users.columns.role') }}</th>
+              <th>{{ t('users.columns.active') }}</th>
+              <th>{{ t('users.columns.created') }}</th>
+              <th class="actions-col">{{ t('users.columns.actions') }}</th>
             </tr>
-            <tr v-if="resettingId === u.id">
-              <td colspan="6">
-                <div class="form-grid">
-                  <label>
-                    {{ t('users.resetPasswordTitle') }} ({{ u.email }})
-                    <input v-model="resetPassword" type="password" />
-                  </label>
-                  <div class="row-actions">
-                    <button @click="submitReset(u)" :disabled="busy || !resetPassword" class="primary small">{{ t('users.resetPasswordSubmit') }}</button>
-                    <button @click="cancelReset" class="btn-link small">{{ t('common.cancel') }}</button>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <template v-for="u in users" :key="u.id">
+              <tr :class="{ inactive: !u.is_active }">
+                <td>{{ u.email }}</td>
+                <td>
+                  <span v-if="editingId !== u.id">{{ u.name }}</span>
+                  <input v-else v-model="editDraft.name" />
+                </td>
+                <td>
+                  <span v-if="editingId !== u.id" class="badge" :class="'role-' + u.role">{{ u.role }}</span>
+                  <select v-else v-model="editDraft.role">
+                    <option value="translator">{{ t('users.roles.translator') }}</option>
+                    <option value="lead_translator">{{ t('users.roles.lead_translator') }}</option>
+                    <option value="admin">{{ t('users.roles.admin') }}</option>
+                  </select>
+                </td>
+                <td>
+                  <span v-if="editingId !== u.id" class="status-dot" :class="u.is_active ? 'dot-on' : 'dot-off'">
+                    {{ u.is_active ? t('users.yes') : t('users.no') }}
+                  </span>
+                  <input v-else type="checkbox" v-model="editDraft.is_active" />
+                </td>
+                <td class="muted">{{ formatDate(u.created_at) }}</td>
+                <td class="row-actions-cell">
+                  <template v-if="editingId === u.id">
+                    <button @click="saveEdit(u)" :disabled="busy" class="small primary">{{ t('users.edit.save') }}</button>
+                    <button @click="cancelEdit" class="small ghost">{{ t('users.edit.cancel') }}</button>
+                  </template>
+                  <template v-else>
+                    <button @click="startEdit(u)" class="small">Edit</button>
+                    <button @click="startReset(u)" class="small ghost">{{ t('users.resetPassword') }}</button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </template>
+
+    <div v-if="resettingId" class="modal-backdrop" @click.self="cancelReset">
+      <div class="modal-card">
+        <h3>{{ t('users.resetPasswordTitle') }}</h3>
+        <p class="muted">{{ resetUserEmail }}</p>
+        <label>
+          {{ t('users.resetPasswordTitle') }}
+          <input v-model="resetPassword" type="password" autofocus />
+        </label>
+        <div class="row-actions">
+          <button @click="submitReset" :disabled="busy || !resetPassword" class="primary">{{ t('users.resetPasswordSubmit') }}</button>
+          <button @click="cancelReset" class="ghost">{{ t('common.cancel') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '../stores/auth'
 import { api } from '../api'
 
 const { t } = useI18n()
-const auth = useAuthStore()
 const router = useRouter()
 
 const users = ref([])
@@ -123,6 +120,7 @@ const editingId = ref(null)
 const editDraft = reactive({ name: '', role: 'translator', is_active: true })
 
 const resettingId = ref(null)
+const resetUserEmail = ref('')
 const resetPassword = ref('')
 
 async function load() {
@@ -183,29 +181,28 @@ async function saveEdit(u) {
   finally { busy.value = false }
 }
 
-function startReset(u) { resettingId.value = u.id; resetPassword.value = '' }
-function cancelReset() { resettingId.value = null; resetPassword.value = '' }
+function startReset(u) {
+  resettingId.value = u.id
+  resetUserEmail.value = u.email
+  resetPassword.value = ''
+}
+function cancelReset() {
+  resettingId.value = null
+  resetUserEmail.value = ''
+  resetPassword.value = ''
+}
 
-async function submitReset(u) {
+async function submitReset() {
   busy.value = true
   error.value = ''
   try {
-    await api.post(`/api/v1/users/${u.id}/password`, { password: resetPassword.value })
-    resettingId.value = null
-    resetPassword.value = ''
+    await api.post(`/api/v1/users/${resettingId.value}/password`, { password: resetPassword.value })
+    cancelReset()
   } catch (e) { error.value = e.message }
   finally { busy.value = false }
 }
 
-function formatDate(iso) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString()
-}
-
-async function onLogout() {
-  await auth.logout()
-  router.push('/login')
-}
+function formatDate(iso) { return iso ? new Date(iso).toLocaleDateString() : '' }
 
 onMounted(load)
 </script>

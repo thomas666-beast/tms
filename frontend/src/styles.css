@@ -690,3 +690,70 @@ tr.row-approved     { background: #f0fdf4; }
   font-size: 14px;
 }
 .empty-block p { margin: 0; }
+
+/* ============================================================
+   Table cards, role chips, status dots, modal
+   ============================================================ */
+.table-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.table-card .table {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.actions-col { width: 1%; text-align: right; }
+.row-actions-cell { text-align: right; white-space: nowrap; }
+.row-actions-cell button { margin-left: 6px; }
+
+.badge.role-admin      { background: #eef2ff; color: var(--accent); }
+.badge.role-lead       { background: #fef3c7; color: #b45309; }
+.badge.role-translator { background: #ecfdf5; color: #059669; }
+.badge.role-lead_translator { background: #fef3c7; color: #b45309; }
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.status-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.dot-on::before  { background: var(--success); }
+.status-dot.dot-off::before { background: var(--border-2); }
+
+tr.inactive td { color: var(--muted); }
+
+/* modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  padding: 24px;
+}
+.modal-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-l);
+  padding: 24px 28px;
+  width: 100%;
+  max-width: 400px;
+}
+.modal-card h3 { margin-top: 0; }
+.modal-card .row-actions { margin-top: 16px; }
