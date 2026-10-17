@@ -11,9 +11,13 @@
       </button>
     </div>
 
+    <div class="toolbar">
+      <input v-model="search" :placeholder="t('projects.search')" />
+    </div>
+
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
-    <p v-else-if="projects.length === 0">{{ t('projects.empty') }}</p>
+    <p v-else-if="filtered.length === 0">{{ t('projects.empty') }}</p>
 
     <table v-else class="table">
       <thead>
@@ -21,12 +25,14 @@
           <th>{{ t('projects.columns.name') }}</th>
           <th>{{ t('projects.columns.slug') }}</th>
           <th>{{ t('projects.columns.sourceLang') }}</th>
+          <th>{{ t('projects.columns.members') }}</th>
+          <th>{{ t('projects.columns.created') }}</th>
           <th>{{ t('projects.columns.role') }}</th>
         </tr>
       </thead>
       <tbody>
         <tr
-          v-for="p in projects"
+          v-for="p in filtered"
           :key="p.id"
           @click="openProject(p.id)"
           class="clickable"
@@ -34,6 +40,8 @@
           <td>{{ p.name }}</td>
           <td><code>{{ p.slug }}</code></td>
           <td>{{ p.default_source_lang }}</td>
+          <td>{{ p.members_count ?? '—' }}</td>
+          <td>{{ formatDate(p.created_at) }}</td>
           <td>{{ p.member_role || '—' }}</td>
         </tr>
       </tbody>
@@ -55,8 +63,17 @@ const router = useRouter()
 const projects = ref([])
 const loading = ref(true)
 const error = ref('')
+const search = ref('')
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
+
+const filtered = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return projects.value
+  return projects.value.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    p.slug.toLowerCase().includes(q))
+})
 
 async function load() {
   loading.value = true
@@ -80,14 +97,11 @@ async function createProject() {
   try {
     await api.post('/api/v1/projects', { name, default_source_lang: lang })
     await load()
-  } catch (e) {
-    error.value = e.message
-  }
+  } catch (e) { error.value = e.message }
 }
 
-function openProject(id) {
-  router.push(`/projects/${id}`)
-}
+function openProject(id) { router.push(`/projects/${id}`) }
+function formatDate(iso) { return iso ? new Date(iso).toLocaleDateString() : '' }
 
 async function onLogout() {
   await auth.logout()

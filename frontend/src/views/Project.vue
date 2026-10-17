@@ -12,11 +12,51 @@
     <template v-else-if="project">
       <h1>{{ project.name }} <small>({{ project.default_source_lang }})</small></h1>
 
-      <h2>{{ t('projects.members') }}</h2>
+      <div class="row">
+        <h2>{{ t('projects.members') }}</h2>
+        <button v-if="isGlobalAdmin" @click="startAddMember" class="primary">
+          {{ t('projects.addMember') }}
+        </button>
+      </div>
+
+      <div v-if="addingMember" class="form-box">
+        <h3>{{ t('projects.addMemberTitle') }}</h3>
+        <div class="form-grid">
+          <label>
+            {{ t('projects.memberUser') }}
+            <select v-model="newMember.user_id">
+              <option value="">—</option>
+              <option v-for="u in addableUsers" :key="u.id" :value="u.id">
+                {{ u.name }} ({{ u.email }})
+              </option>
+            </select>
+          </label>
+          <label>
+            {{ t('projects.memberRole') }}
+            <select v-model="newMember.role">
+              <option value="translator">{{ t('members.role.translator') }}</option>
+              <option value="lead">{{ t('members.role.lead') }}</option>
+              <option value="admin">{{ t('members.role.admin') }}</option>
+            </select>
+          </label>
+        </div>
+        <div class="row-actions">
+          <button @click="addMember" :disabled="!newMember.user_id || busy" class="primary">
+            {{ t('projects.addMemberSubmit') }}
+          </button>
+          <button @click="cancelAddMember" class="btn-link">{{ t('common.cancel') }}</button>
+        </div>
+      </div>
+
       <ul class="list">
         <li v-for="m in members" :key="m.user_id">
           {{ m.name }} <small>&lt;{{ m.email }}&gt;</small>
           — <span class="badge">{{ m.role }}</span>
+          <button
+            v-if="isGlobalAdmin && m.user_id !== auth.user?.id"
+            @click="removeMember(m.user_id)"
+            class="small ghost"
+          >{{ t('projects.removeMember') }}</button>
         </li>
       </ul>
 
@@ -55,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
@@ -68,15 +108,27 @@ const route = useRoute()
 
 const project = ref(null)
 const members = ref([])
-const files   = ref([])
+const files = ref([])
+const allUsers = ref([])
 const loading = ref(true)
-const error   = ref('')
+const error = ref('')
 const uploading = ref(false)
+const busy = ref(false)
+
+const addingMember = ref(false)
+const newMember = reactive({ user_id: '', role: 'translator' })
+
+const isGlobalAdmin = computed(() => auth.user?.role === 'admin')
 
 const canManageFiles = computed(() => {
-  if (auth.user?.role === 'admin') return true
+  if (isGlobalAdmin.value) return true
   const me = members.value.find(m => m.user_id === auth.user?.id)
   return me?.role === 'admin'
+})
+
+const addableUsers = computed(() => {
+  const existing = new Set(members.value.map(m => m.user_id))
+  return allUsers.value.filter(u => !existing.has(u.id))
 })
 
 async function load() {
@@ -99,6 +151,46 @@ async function load() {
   }
 }
 
+async function startAddMember() {
+  if (!allUsers.value.length) {
+    try {
+      const data = await api.get('/api/v1/users')
+      allUsers.value = data.users || []
+    } catch (e) { error.value = e.message; return }
+  }
+  addingMember.value = true
+  newMember.user_id = ''
+  newMember.role = 'translator'
+}
+function cancelAddMember() { addingMember.value = false }
+
+async function addMember() {
+  busy.value = true
+  error.value = ''
+  try {
+    await api.post(`/api/v1/projects/${route.params.id}/members`, {
+      user_id: Number(newMember.user_id),
+      role: newMember.role,
+    })
+    addingMember.value = false
+    await load()
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+
+async function removeMember(userId) {
+  if (!window.confirm(t('projects.confirmRemoveMember'))) return
+  busy.value = true
+  error.value = ''
+  try {
+    await api.del(`/api/v1/projects/${route.params.id}/members/${userId}`)
+    await load()
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+
+function openFile(id) { router.push(`/files/${id}`) }
+
 async function upload() {
   const input = document.createElement('input')
   input.type = 'file'
@@ -120,23 +212,19 @@ async function upload() {
     uploading.value = true
     error.value = ''
     try {
-      await fetch(`/api/v1/projects/${route.params.id}/files`, {
+      const res = await fetch(`/api/v1/projects/${route.params.id}/files`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'X-CSRF-Token': auth.csrf_token },
         body: fd,
-      }).then(async r => {
-        if (!r.ok) {
-          const j = await r.json().catch(() => ({}))
-          throw new Error(j.error || `HTTP ${r.status}`)
-        }
       })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
       await load()
-    } catch (e) {
-      error.value = e.message
-    } finally {
-      uploading.value = false
-    }
+    } catch (e) { error.value = e.message }
+    finally { uploading.value = false }
   }
   input.click()
 }
@@ -144,10 +232,6 @@ async function upload() {
 async function onLogout() {
   await auth.logout()
   router.push('/login')
-}
-
-function openFile(id) {
-  router.push(`/files/${id}`)
 }
 
 onMounted(load)

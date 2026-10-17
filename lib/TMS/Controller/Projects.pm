@@ -1,9 +1,6 @@
 package TMS::Controller::Projects;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
-# ------------------------------------------------------------
-# GET /api/v1/projects
-# ------------------------------------------------------------
 sub list ($c) {
   my $u = $c->current_user;
 
@@ -11,7 +8,8 @@ sub list ($c) {
     ? $c->db->query(
         q{
           SELECT p.id, p.name, p.slug, p.default_source_lang,
-                 p.created_at, p.updated_at
+                 p.created_at, p.updated_at,
+                 (SELECT count(*) FROM project_members m WHERE m.project_id = p.id) AS members_count
             FROM projects p
            ORDER BY p.created_at DESC, p.id DESC
         },
@@ -19,7 +17,8 @@ sub list ($c) {
     : $c->db->query(
         q{
           SELECT p.id, p.name, p.slug, p.default_source_lang,
-                 p.created_at, p.updated_at, m.role AS member_role
+                 p.created_at, p.updated_at, m.role AS member_role,
+                 (SELECT count(*) FROM project_members m2 WHERE m2.project_id = p.id) AS members_count
             FROM projects p
             JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
            ORDER BY p.created_at DESC, p.id DESC
@@ -32,9 +31,6 @@ sub list ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# POST /api/v1/projects  { name, default_source_lang }
-# ------------------------------------------------------------
 sub create ($c) {
   my $body = $c->req->json || {};
   my $name = $body->{name}                // '';
@@ -56,7 +52,6 @@ sub create ($c) {
     $name, $slug, $lang, $u->{id},
   )->hash;
 
-  # creator becomes project admin
   $c->db->query(
     q{
       INSERT INTO project_members (project_id, user_id, role, added_by)
@@ -74,12 +69,9 @@ sub create ($c) {
   $c->render(json => { project => _public_project($project) }, status => 201);
 }
 
-# ------------------------------------------------------------
-# GET /api/v1/projects/:id
-# ------------------------------------------------------------
 sub show ($c) {
   my $id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $id && $id =~ /\A\d+\z/;
 
   return undef unless $c->can_access_project($id);
 
@@ -94,7 +86,6 @@ sub show ($c) {
 
   return _err($c, 404, 'project_not_found') unless $project;
 
-  # include members for the caller if they can see the project
   my $members = $c->db->query(
     q{
       SELECT m.user_id, m.role, u.email, u.name
@@ -112,12 +103,9 @@ sub show ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# PATCH /api/v1/projects/:id  { name?, default_source_lang? }
-# ------------------------------------------------------------
 sub update ($c) {
   my $id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $id && $id =~ /\A\d+\z/;
 
   return undef unless $c->can_access_project($id);
 
@@ -169,9 +157,7 @@ sub update ($c) {
 
   $c->render(json => { project => _public_project($row) });
 }
-# ------------------------------------------------------------
-# helpers
-# ------------------------------------------------------------
+
 sub _err ($c, $status, $code) {
   $c->render(json => { error => $code }, status => $status);
   return undef;
@@ -186,7 +172,8 @@ sub _public_project ($p) {
     created_at          => $p->{created_at},
     updated_at          => $p->{updated_at},
   );
-  $out{member_role} = $p->{member_role} if defined $p->{member_role};
+  $out{member_role}   = $p->{member_role}   if defined $p->{member_role};
+  $out{members_count} = 0 + $p->{members_count} if defined $p->{members_count};
   return \%out;
 }
 

@@ -6,14 +6,19 @@ import i18n from './i18n'
 import './styles.css'
 import { useAuthStore } from './stores/auth'
 
+const pinia = createPinia()
 const app = createApp(App)
-app.use(createPinia())
+app.use(pinia)
 app.use(i18n)
-app.use(router)
 
 async function boot() {
-  const auth = useAuthStore()
+  // Restore the session BEFORE installing the router: app.use(router)
+  // triggers the initial navigation, and the guard needs auth.user by then.
+  const auth = useAuthStore(pinia)
   try { await auth.fetchMe() } catch {}
+
+  app.use(router)
+  await router.isReady()
   app.mount('#app')
 }
 

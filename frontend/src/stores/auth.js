@@ -13,7 +13,11 @@ export const useAuthStore = defineStore('auth', () => {
         credentials: 'include',
         headers: { 'Accept': 'application/json' },
       })
-      if (!res.ok) { user.value = null; csrf_token.value = null; return }
+      if (!res.ok) {
+        user.value = null
+        csrf_token.value = null
+        return
+      }
       const data = await res.json()
       user.value = data.user || null
       csrf_token.value = data.csrf_token || null
