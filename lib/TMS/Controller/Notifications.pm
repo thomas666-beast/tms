@@ -1,6 +1,8 @@
 package TMS::Controller::Notifications;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
+use Mojo::JSON qw(decode_json);
+
 sub list ($c) {
   my $me = $c->current_user;
   my $only_unread = ($c->param('unread') // '') eq '1';
@@ -9,7 +11,7 @@ sub list ($c) {
                FROM notifications
               WHERE user_id = ?';
   $sql .= ' AND read_at IS NULL' if $only_unread;
-  $sql .= ' ORDER BY id DESC LIMIT 200';
+  $sql .= ' ORDER BY id DESC LIMIT 100';
 
   my $rows = $c->db->query($sql, $me->{id})->hashes;
 
@@ -26,7 +28,7 @@ sub list ($c) {
 
 sub mark_read ($c) {
   my $id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $id && $id =~ /\A\d+\z/;
 
   my $me = $c->current_user;
   my $row = $c->db->query(
@@ -60,15 +62,15 @@ sub _err ($c, $status, $code) {
 sub _public ($r) {
   my $payload = $r->{payload};
   if (defined $payload && !ref $payload) {
-    require Mojo::JSON;
-    $payload = Mojo::JSON::decode_json($payload);
+    my $decoded = eval { decode_json($payload) };
+    $payload = $decoded if $decoded;
   }
   return {
     id          => 0 + $r->{id},
     type        => $r->{type},
     entity_type => $r->{entity_type},
     entity_id   => 0 + $r->{entity_id},
-    payload     => $payload // {},
+    payload     => $payload || {},
     read_at     => $r->{read_at},
     created_at  => $r->{created_at},
   };
