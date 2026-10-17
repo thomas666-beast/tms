@@ -56,6 +56,9 @@ sub register ($self, $app, $conf) {
   $authed->delete  ('/projects/:id/members/:user_id') ->to('ProjectMembers#remove');
 
   $authed->post ('/projects/:id/files')            ->to('Files#upload');
+  $authed->get  ('/projects/:id/files')            ->to('Files#list_by_project');
+  $authed->get  ('/files/:id')                     ->to('Files#show');
+  $authed->get  ('/files/:id/keys')                ->to('Files#keys');
 
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');
