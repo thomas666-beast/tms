@@ -17,6 +17,7 @@ requires 'Mojo::Pg';
 requires 'Mojolicious::Plugin::CSRFProtect';
 requires 'Authen::Passphrase';
 requires 'Crypt::Eksblowfish';   # bcrypt backend
+requires 'Crypt::URandom';
 
 # --- JSON ---
 requires 'JSON::XS';
