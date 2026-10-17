@@ -55,6 +55,8 @@ export default {
       noKeys: 'This file has no translation keys.',
       needMember: 'Add a translator to this project first.',
       goToMembers: 'Go to project members →',
+      previous: 'Previous',
+      noPrevious: 'No previous approved revision.',
     },
     status: {
       empty: 'empty', ai_draft: 'AI draft', translated: 'translated',
@@ -72,6 +74,7 @@ export default {
     reviewPanel: 'Review',
     approveComment: 'Comment (optional)', rejectComment: 'Comment (required)',
     approveSuccess: 'Approved.', rejectSuccess: 'Rejected. A new revision has opened.',
+    compareMode: 'Compare with previous approved',
     errors: {
       cannot_approve_own_work: 'You cannot approve a file assigned to you.',
       already_decided: 'You have already decided on this revision.',

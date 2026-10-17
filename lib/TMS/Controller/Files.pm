@@ -16,10 +16,7 @@ sub upload ($c) {
     || ($member && $member->{role} eq 'admin');
   return _err($c, 403, 'forbidden') unless $is_project_admin;
 
-  my $project = $c->db->query(
-    'SELECT id FROM projects WHERE id = ?',
-    $project_id,
-  )->hash;
+  my $project = $c->db->query('SELECT id FROM projects WHERE id = ?', $project_id)->hash;
   return _err($c, 404, 'project_not_found') unless $project;
 
   my $format      = $c->param('format')      // '';
@@ -141,10 +138,7 @@ sub list_by_project ($c) {
 
   return undef unless $c->can_access_project($project_id);
 
-  my $project = $c->db->query(
-    'SELECT id FROM projects WHERE id = ?',
-    $project_id,
-  )->hash;
+  my $project = $c->db->query('SELECT id FROM projects WHERE id = ?', $project_id)->hash;
   return _err($c, 404, 'project_not_found') unless $project;
 
   my $rows = $c->db->query(
@@ -225,6 +219,23 @@ sub keys ($c) {
   return _err($c, 400, 'invalid_status')
     unless $status_filter =~ /\A(?:all|empty|ai_draft|translated|needs_review|approved|rejected)\z/;
 
+  my $with_previous = ($c->param('with_previous') // '') eq '1' ? 1 : 0;
+
+  my $prev_revision_id;
+  if ($with_previous) {
+    my $prev = $c->db->query(
+      q{
+        SELECT id
+          FROM file_revisions
+         WHERE file_id = ? AND status = 'approved'
+         ORDER BY revision_number DESC
+         LIMIT 1
+      },
+      $file->{id},
+    )->hash;
+    $prev_revision_id = $prev ? $prev->{id} : undef;
+  }
+
   my $rows = $c->db->query(
     q{
       SELECT k.id, k.key_path, k.source_text,
@@ -235,7 +246,9 @@ sub keys ($c) {
              t.translated_by_user_id,
              t.translated_by_ai,
              t.ai_engine,
-             t.created_at   AS translation_created_at
+             t.created_at   AS translation_created_at,
+             p.text         AS prev_translation_text,
+             p.status       AS prev_translation_status
         FROM keys k
         LEFT JOIN LATERAL (
           SELECT *
@@ -246,10 +259,21 @@ sub keys ($c) {
            ORDER BY created_at DESC
            LIMIT 1
         ) t ON true
+        LEFT JOIN LATERAL (
+          SELECT *
+            FROM translations
+           WHERE key_id = k.id
+             AND revision_id = ?
+             AND language = ?
+           ORDER BY created_at DESC
+           LIMIT 1
+        ) p ON true
        WHERE k.file_id = ?
        ORDER BY k.key_path
     },
-    $file->{current_revision_id}, $file->{target_lang}, $file_id,
+    $file->{current_revision_id}, $file->{target_lang},
+    $prev_revision_id // -1, $file->{target_lang},
+    $file_id,
   )->hashes;
 
   if ($status_filter ne 'all') {
@@ -268,7 +292,8 @@ sub keys ($c) {
       project_id  => 0 + $file->{project_id},
       target_lang => $file->{target_lang},
     },
-    keys => [ map { _public_key($_) } @$rows ],
+    previous_revision_id => $prev_revision_id,
+    keys => [ map { _public_key($_, $with_previous) } @$rows ],
   });
 }
 
@@ -314,21 +339,16 @@ sub assign ($c) {
   my $prev_id = $file->{assigned_to_user_id};
 
   $c->db->query(
-    q{
-      UPDATE files
-         SET assigned_to_user_id = ?, status = 'assigned'
-       WHERE id = ?
-    },
+    q{UPDATE files SET assigned_to_user_id = ?, status = 'assigned' WHERE id = ?},
     $user_id, $file_id,
   );
 
   $c->db->query(
-    'UPDATE assignments SET unassigned_at = now()
-      WHERE file_id = ? AND unassigned_at IS NULL',
+    'UPDATE assignments SET unassigned_at = now() WHERE file_id = ? AND unassigned_at IS NULL',
     $file_id,
   );
   $c->db->query(
-    q{INSERT INTO assignments (file_id, user_id, assigned_by) VALUES (?, ?, ?)},
+    'INSERT INTO assignments (file_id, user_id, assigned_by) VALUES (?, ?, ?)',
     $file_id, $user_id, $me->{id},
   );
 
@@ -406,19 +426,107 @@ sub unassign ($c) {
   );
 
   $c->db->query(
-    'UPDATE assignments SET unassigned_at = now()
-      WHERE file_id = ? AND unassigned_at IS NULL',
+    'UPDATE assignments SET unassigned_at = now() WHERE file_id = ? AND unassigned_at IS NULL',
     $file_id,
   );
 
-  _audit($c, 'file.unassign', $file_id, {
-    prev_id => 0 + $prev_id,
-  });
+  _audit($c, 'file.unassign', $file_id, { prev_id => 0 + $prev_id });
 
   $c->render(json => {
     ok   => 1,
     file => { id => 0 + $file_id, assigned_to_user_id => undef, status => 'unassigned' },
   });
+}
+
+sub export ($c) {
+  my $file_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
+
+  my $file = $c->db->query(
+    q{
+      SELECT id, project_id, name, format, source_lang, target_lang,
+             current_revision_id
+        FROM files
+       WHERE id = ?
+    },
+    $file_id,
+  )->hash;
+  return _err($c, 404, 'file_not_found') unless $file;
+  return undef unless $c->can_access_project($file->{project_id});
+
+  my $revision_mode = $c->param('revision') // 'current';
+  return _err($c, 400, 'invalid_revision')
+    unless $revision_mode =~ /\A(?:current|latest_approved)\z/;
+
+  my $revision_id;
+  if ($revision_mode eq 'current') {
+    $revision_id = $file->{current_revision_id};
+  } else {
+    my $row = $c->db->query(
+      q{
+        SELECT id FROM file_revisions
+         WHERE file_id = ? AND status = 'approved'
+         ORDER BY revision_number DESC LIMIT 1
+      },
+      $file->{id},
+    )->hash;
+    return _err($c, 404, 'no_approved_revision') unless $row;
+    $revision_id = $row->{id};
+  }
+
+  my $adapter = eval { TMS::Adapter->for($file->{format}) };
+  return _err($c, 500, 'adapter_failed') unless $adapter;
+
+  my $keys = $c->db->query(
+    q{
+      SELECT k.key_path, k.source_text,
+             t.text   AS translation_text,
+             t.status AS translation_status
+        FROM keys k
+        LEFT JOIN LATERAL (
+          SELECT text, status FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC LIMIT 1
+        ) t ON true
+       WHERE k.file_id = ?
+       ORDER BY k.key_path
+    },
+    $revision_id, $file->{target_lang}, $file->{id},
+  )->hashes;
+
+  my %flat;
+  for my $k (@$keys) {
+    my $use = $k->{source_text} // '';
+    if (defined $k->{translation_text}
+        && $k->{translation_status}
+        && $k->{translation_status} =~ /\A(?:translated|approved)\z/) {
+      $use = $k->{translation_text};
+    }
+    $flat{ $k->{key_path} } = $use;
+  }
+
+  my $body;
+  eval { $body = $adapter->serialize(\%flat); 1 }
+    or do {
+      my $err = $@ || 'serialize failed';
+      chomp $err;
+      return _err($c, 500, 'serialize_failed', { detail => $err });
+    };
+
+  my $ext  = $adapter->extension;
+  my $name = $file->{name};
+  $name =~ s/\.[^.]+\z//;
+  $name = $name . '.' . $ext;
+
+  my $content_type = $ext eq 'json' ? 'application/json'
+                   : $ext eq 'php'  ? 'text/x-php'
+                   : $ext eq 'yaml' ? 'text/yaml'
+                   : $ext eq 'arb'  ? 'application/json'
+                   : 'text/plain';
+
+  $c->res->headers->content_type($content_type);
+  $c->res->headers->content_disposition(qq{attachment; filename="$name"});
+  $c->render(data => $body);
 }
 
 sub _err ($c, $status, $code, $extra = undef) {
@@ -449,7 +557,7 @@ sub _public_file ($f) {
   };
 }
 
-sub _public_key ($r) {
+sub _public_key ($r, $with_previous = 0) {
   my %t;
   if (defined $r->{translation_id}) {
     $t{id}                    = 0 + $r->{translation_id};
@@ -462,12 +570,23 @@ sub _public_key ($r) {
     $t{created_at}            = $r->{translation_created_at};
   }
 
-  return {
+  my %out = (
     id          => 0 + $r->{id},
     key_path    => $r->{key_path},
     source_text => $r->{source_text},
     translation => defined $r->{translation_id} ? \%t : undef,
-  };
+  );
+
+  if ($with_previous) {
+    $out{previous_translation} = defined $r->{prev_translation_text}
+      ? {
+          text   => $r->{prev_translation_text},
+          status => $r->{prev_translation_status},
+        }
+      : undef;
+  }
+
+  return \%out;
 }
 
 sub _audit ($c, $action, $file_id, $new) {
@@ -483,105 +602,6 @@ sub _audit ($c, $action, $file_id, $new) {
     defined $new ? Mojo::JSON::encode_json($new) : undef,
     $c->tx->remote_address,
   );
-}
-
-sub export ($c) {
-  my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
-
-  my $file = $c->db->query(
-    q{
-      SELECT id, project_id, name, format, source_lang, target_lang,
-             current_revision_id
-        FROM files
-       WHERE id = ?
-    },
-    $file_id,
-  )->hash;
-  return _err($c, 404, 'file_not_found') unless $file;
-
-  return undef unless $c->can_access_project($file->{project_id});
-
-  my $revision_mode = $c->param('revision') // 'current';
-  return _err($c, 400, 'invalid_revision')
-    unless $revision_mode =~ /\A(?:current|latest_approved)\z/;
-
-  my $revision_id;
-  if ($revision_mode eq 'current') {
-    $revision_id = $file->{current_revision_id};
-  }
-  else {
-    my $row = $c->db->query(
-      q{
-        SELECT id
-          FROM file_revisions
-         WHERE file_id = ? AND status = 'approved'
-         ORDER BY revision_number DESC
-         LIMIT 1
-      },
-      $file->{id},
-    )->hash;
-    return _err($c, 404, 'no_approved_revision') unless $row;
-    $revision_id = $row->{id};
-  }
-
-  my $adapter = eval { TMS::Adapter->for($file->{format}) };
-  return _err($c, 500, 'adapter_failed') unless $adapter;
-
-  my $keys = $c->db->query(
-    q{
-      SELECT k.key_path, k.source_text,
-             t.text   AS translation_text,
-             t.status AS translation_status
-        FROM keys k
-        LEFT JOIN LATERAL (
-          SELECT text, status
-            FROM translations
-           WHERE key_id = k.id
-             AND revision_id = ?
-             AND language = ?
-           ORDER BY created_at DESC
-           LIMIT 1
-        ) t ON true
-       WHERE k.file_id = ?
-       ORDER BY k.key_path
-    },
-    $revision_id, $file->{target_lang}, $file->{id},
-  )->hashes;
-
-  my %flat;
-  for my $k (@$keys) {
-    my $use = $k->{source_text} // '';
-    if (defined $k->{translation_text}
-        && $k->{translation_status}
-        && $k->{translation_status} =~ /\A(?:translated|approved)\z/) {
-      $use = $k->{translation_text};
-    }
-    $flat{ $k->{key_path} } = $use;
-  }
-
-  my $body;
-  eval { $body = $adapter->serialize(\%flat); 1 }
-    or do {
-      my $err = $@ || 'serialize failed';
-      chomp $err;
-      return _err($c, 500, 'serialize_failed', { detail => $err });
-    };
-
-  my $ext  = $adapter->extension;
-  my $name = $file->{name};
-  $name =~ s/\.[^.]+\z//;    # strip any existing extension
-  $name = $name . '.' . $ext;
-
-  my $content_type = $ext eq 'json' ? 'application/json'
-                   : $ext eq 'php'  ? 'text/x-php'
-                   : $ext eq 'yaml' ? 'text/yaml'
-                   : $ext eq 'arb'  ? 'application/json'
-                   : 'text/plain';
-
-  $c->res->headers->content_type($content_type);
-  $c->res->headers->content_disposition(qq{attachment; filename="$name"});
-  $c->render(data => $body);
 }
 
 1;
