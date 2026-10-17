@@ -82,4 +82,18 @@ export default {
     loading: 'Loading…', error: 'Something went wrong.',
     forbidden: 'You do not have access.', cancel: 'Cancel',
   },
+  dashboard: {
+    title: 'Dashboard',
+    emptyState: 'Nothing here yet.',
+    goToProjects: 'Go to projects →',
+    assignedTitle: 'Assigned to me',
+    assignedEmpty: 'Nothing assigned to you right now.',
+    reviewableTitle: 'Waiting for my review',
+    reviewableEmpty: 'No files are waiting for your review.',
+    recentTitle: 'Recently approved',
+    recentEmpty: 'No approved files yet.',
+    columns: {
+      name: 'File', project: 'Project', target: 'Target', status: 'Status', approvals: 'Approvals',
+    },
+  },
 }

@@ -105,7 +105,7 @@ $t->post_ok("/api/v1/projects/$project_id/files" => {%h} => form => {
   ->json_is('/file/format',      'laravel')
   ->json_is('/file/source_lang', 'en')
   ->json_is('/file/target_lang', 'fr')
-  ->json_is('/file/status',      'in_progress')
+  ->json_is('/file/status',      'unassigned')
   ->json_is('/file/keys_count',  3);
 
 my $file_id = $t->tx->res->json->{file}{id};

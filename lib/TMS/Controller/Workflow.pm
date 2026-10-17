@@ -3,23 +3,19 @@ use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::JSON;
 
-# ------------------------------------------------------------
-# POST /api/v1/files/:id/submit
-# ------------------------------------------------------------
 sub submit ($c) {
   my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
 
   my $file = _load_file($c, $file_id);
   return _err($c, 404, 'file_not_found') unless $file;
 
   return undef unless $c->can_access_project($file->{project_id});
-
   return _err($c, 403, 'forbidden')
     unless _is_project_lead_or_admin($c, $file->{project_id});
 
   return _err($c, 409, 'invalid_state')
-    unless $file->{file_status} eq 'in_progress';
+    unless $file->{file_status} =~ /\A(?:unassigned|assigned|in_progress)\z/;
 
   my $revision = _load_revision($c, $file->{current_revision_id});
   return _err($c, 409, 'invalid_revision_state')
@@ -39,29 +35,45 @@ sub submit ($c) {
   return _err($c, 409, 'no_translations') if $translated == 0;
 
   my $me = $c->current_user;
+  my $db = $c->db;
 
-  eval {
-    $c->db->query('BEGIN');
-
-    $c->db->query(
+  my $ok = eval {
+    my $tx = $db->begin;    # rolls back automatically if not committed
+    $db->query(
       "UPDATE file_revisions SET status = 'in_review' WHERE id = ?",
       $revision->{id},
     );
-    $c->db->query(
+    $db->query(
       "UPDATE files SET status = 'in_review' WHERE id = ?",
       $file->{id},
     );
-
-    $c->db->query('COMMIT');
+    $tx->commit;
     1;
-  } or do {
-    my $err = $@;
-    eval { $c->db->query('ROLLBACK') };
-    return _err($c, 500, 'submit_failed');
   };
+  unless ($ok) {
+    $c->app->log->error("submit failed: $@");
+    return _err($c, 500, 'submit_failed');
+  }
+
+  my $project = $db->query(
+    'SELECT id, name FROM projects WHERE id = ?',
+    $file->{project_id},
+  )->hash;
+
+  $c->notifier->emit_many(
+    $c->notifier->project_leads_and_admins($file->{project_id}, $me->{id}),
+    'file_submitted', 'file', $file->{id},
+    {
+      file_id      => 0 + $file->{id},
+      project_id   => 0 + $file->{project_id},
+      project_name => $project->{name},
+      actor_name   => $me->{name},
+      revision_id  => 0 + $revision->{id},
+    },
+  );
 
   _audit($c, 'file.submit', $file->{id}, {
-    revision_id => 0 + $revision->{id},
+    revision_id     => 0 + $revision->{id},
     revision_number => 0 + $revision->{revision_number},
   });
 
@@ -72,26 +84,21 @@ sub submit ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# POST /api/v1/files/:id/approve  { comment? }
-# ------------------------------------------------------------
 sub approve ($c) {
   my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
 
   my $file = _load_file($c, $file_id);
   return _err($c, 404, 'file_not_found') unless $file;
 
   return undef unless $c->can_access_project($file->{project_id});
 
-  my $me = $c->current_user;
-
+  my $me   = $c->current_user;
   my $role = _project_role($c, $file->{project_id});
-  my $is_lead = $role && ($role eq 'admin' || $role eq 'lead');
+  my $is_lead         = $role && ($role eq 'admin' || $role eq 'lead');
   my $is_global_admin = $me->{role} eq 'admin';
   return _err($c, 403, 'forbidden') unless $is_lead || $is_global_admin;
 
-  # translator of this file cannot approve it
   if (defined $file->{assigned_to_user_id}
       && $file->{assigned_to_user_id} == $me->{id}) {
     return _err($c, 403, 'cannot_approve_own_work');
@@ -107,7 +114,9 @@ sub approve ($c) {
   my $body    = $c->req->json || {};
   my $comment = $body->{comment};
 
-  my $already = $c->db->query(
+  my $db = $c->db;
+
+  my $already = $db->query(
     'SELECT decision FROM approvals WHERE revision_id = ? AND user_id = ?',
     $revision->{id}, $me->{id},
   )->hash;
@@ -115,10 +124,10 @@ sub approve ($c) {
 
   my ($quorum_ok, $approval_count, $has_admin);
 
-  eval {
-    $c->db->query('BEGIN');
+  my $ok = eval {
+    my $tx = $db->begin;
 
-    $c->db->query(
+    $db->query(
       q{
         INSERT INTO approvals
           (file_id, revision_id, user_id, decision, comment, user_role_at_time)
@@ -127,7 +136,7 @@ sub approve ($c) {
       $file->{id}, $revision->{id}, $me->{id}, $comment, $me->{role},
     );
 
-    my $stats = $c->db->query(
+    my $stats = $db->query(
       q{
         SELECT count(*) AS n,
                count(*) FILTER (WHERE user_role_at_time = 'admin') AS admins
@@ -142,23 +151,46 @@ sub approve ($c) {
     $quorum_ok      = $approval_count >= 2 && $has_admin;
 
     if ($quorum_ok) {
-      $c->db->query(
+      $db->query(
         "UPDATE file_revisions SET status = 'approved', approved_at = now() WHERE id = ?",
         $revision->{id},
       );
-      $c->db->query(
+      $db->query(
         "UPDATE files SET status = 'approved' WHERE id = ?",
         $file->{id},
       );
     }
 
-    $c->db->query('COMMIT');
+    $tx->commit;
     1;
-  } or do {
-    my $err = $@;
-    eval { $c->db->query('ROLLBACK') };
-    return _err($c, 500, 'approve_failed');
   };
+  unless ($ok) {
+    $c->app->log->error("approve failed: $@");
+    return _err($c, 500, 'approve_failed');
+  }
+
+  if ($quorum_ok) {
+    my $project = $db->query(
+      'SELECT id, name FROM projects WHERE id = ?',
+      $file->{project_id},
+    )->hash;
+
+    my @recipients;
+    push @recipients, $file->{assigned_to_user_id}
+      if defined $file->{assigned_to_user_id};
+    push @recipients, @{ $c->notifier->project_admins($file->{project_id}, $me->{id}) };
+
+    $c->notifier->emit_many(
+      \@recipients, 'file_approved', 'file', $file->{id},
+      {
+        file_id      => 0 + $file->{id},
+        project_id   => 0 + $file->{project_id},
+        project_name => $project->{name},
+        actor_name   => $me->{name},
+        revision_id  => 0 + $revision->{id},
+      },
+    );
+  }
 
   _audit($c, 'file.approve', $file->{id}, {
     revision_id => 0 + $revision->{id},
@@ -175,22 +207,18 @@ sub approve ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# POST /api/v1/files/:id/reject  { comment }
-# ------------------------------------------------------------
 sub reject ($c) {
   my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
 
   my $file = _load_file($c, $file_id);
   return _err($c, 404, 'file_not_found') unless $file;
 
   return undef unless $c->can_access_project($file->{project_id});
 
-  my $me = $c->current_user;
-
+  my $me   = $c->current_user;
   my $role = _project_role($c, $file->{project_id});
-  my $is_lead = $role && ($role eq 'admin' || $role eq 'lead');
+  my $is_lead         = $role && ($role eq 'admin' || $role eq 'lead');
   my $is_global_admin = $me->{role} eq 'admin';
   return _err($c, 403, 'forbidden') unless $is_lead || $is_global_admin;
 
@@ -205,17 +233,19 @@ sub reject ($c) {
   my $comment = $body->{comment} // '';
   return _err($c, 400, 'comment_required') unless length $comment;
 
-  my $already = $c->db->query(
+  my $db = $c->db;
+
+  my $already = $db->query(
     'SELECT decision FROM approvals WHERE revision_id = ? AND user_id = ?',
     $revision->{id}, $me->{id},
   )->hash;
   return _err($c, 409, 'already_decided') if $already;
 
   my $new_revision;
-  eval {
-    $c->db->query('BEGIN');
+  my $ok = eval {
+    my $tx = $db->begin;
 
-    $c->db->query(
+    $db->query(
       q{
         INSERT INTO approvals
           (file_id, revision_id, user_id, decision, comment, user_role_at_time)
@@ -224,12 +254,12 @@ sub reject ($c) {
       $file->{id}, $revision->{id}, $me->{id}, $comment, $me->{role},
     );
 
-    $c->db->query(
+    $db->query(
       "UPDATE file_revisions SET status = 'rejected' WHERE id = ?",
       $revision->{id},
     );
 
-    $new_revision = $c->db->query(
+    $new_revision = $db->query(
       q{
         INSERT INTO file_revisions (file_id, revision_number, status, created_by_user_id)
         VALUES (?, ?, 'open', ?)
@@ -238,18 +268,41 @@ sub reject ($c) {
       $file->{id}, $revision->{revision_number} + 1, $me->{id},
     )->hash;
 
-    $c->db->query(
+    $db->query(
       "UPDATE files SET status = 'in_progress', current_revision_id = ? WHERE id = ?",
       $new_revision->{id}, $file->{id},
     );
 
-    $c->db->query('COMMIT');
+    $tx->commit;
     1;
-  } or do {
-    my $err = $@;
-    eval { $c->db->query('ROLLBACK') };
-    return _err($c, 500, 'reject_failed');
   };
+  unless ($ok) {
+    $c->app->log->error("reject failed: $@");
+    return _err($c, 500, 'reject_failed');
+  }
+
+  my $project = $db->query(
+    'SELECT id, name FROM projects WHERE id = ?',
+    $file->{project_id},
+  )->hash;
+
+  my @recipients;
+  push @recipients, $file->{assigned_to_user_id}
+    if defined $file->{assigned_to_user_id};
+  push @recipients, @{ $c->notifier->project_admins($file->{project_id}, $me->{id}) };
+
+  $c->notifier->emit_many(
+    \@recipients, 'file_rejected', 'file', $file->{id},
+    {
+      file_id           => 0 + $file->{id},
+      project_id        => 0 + $file->{project_id},
+      project_name      => $project->{name},
+      actor_name        => $me->{name},
+      rejected_revision => 0 + $revision->{id},
+      new_revision      => 0 + $new_revision->{id},
+      comment           => $comment,
+    },
+  );
 
   _audit($c, 'file.reject', $file->{id}, {
     rejected_revision_id => 0 + $revision->{id},
@@ -259,8 +312,8 @@ sub reject ($c) {
   });
 
   $c->render(json => {
-    ok      => 1,
-    file    => { id => 0 + $file->{id}, status => 'in_progress' },
+    ok       => 1,
+    file     => { id => 0 + $file->{id}, status => 'in_progress' },
     revision => {
       id              => 0 + $new_revision->{id},
       revision_number => 0 + $new_revision->{revision_number},
@@ -269,12 +322,9 @@ sub reject ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# GET /api/v1/files/:id/approvals
-# ------------------------------------------------------------
 sub approvals ($c) {
   my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
 
   my $file = _load_file($c, $file_id);
   return _err($c, 404, 'file_not_found') unless $file;
@@ -294,20 +344,17 @@ sub approvals ($c) {
     $file->{id}, $file->{current_revision_id},
   )->hashes;
 
-  my $count = scalar(grep { $_->{decision} eq 'approve' } @$rows);
+  my $count     = scalar(grep { $_->{decision} eq 'approve' } @$rows);
   my $has_admin = grep { $_->{decision} eq 'approve' && $_->{user_role_at_time} eq 'admin' } @$rows;
 
   $c->render(json => {
-    approvals       => [ map { _public_approval($_) } @$rows ],
-    approve_count   => $count,
-    has_admin       => $has_admin ? 1 : 0,
-    quorum_met      => ($count >= 2 && $has_admin) ? 1 : 0,
+    approvals     => [ map { _public_approval($_) } @$rows ],
+    approve_count => $count,
+    has_admin     => $has_admin ? 1 : 0,
+    quorum_met    => ($count >= 2 && $has_admin) ? 1 : 0,
   });
 }
 
-# ------------------------------------------------------------
-# helpers
-# ------------------------------------------------------------
 sub _err ($c, $status, $code) {
   $c->render(json => { error => $code }, status => $status);
   return undef;
@@ -347,15 +394,15 @@ sub _is_project_lead_or_admin ($c, $project_id) {
 
 sub _public_approval ($a) {
   return {
-    id                 => 0 + $a->{id},
-    revision_id        => 0 + $a->{revision_id},
-    user_id            => 0 + $a->{user_id},
-    user_name          => $a->{user_name},
-    user_email         => $a->{user_email},
-    decision           => $a->{decision},
-    comment            => $a->{comment},
-    user_role_at_time  => $a->{user_role_at_time},
-    created_at         => $a->{created_at},
+    id                => 0 + $a->{id},
+    revision_id       => 0 + $a->{revision_id},
+    user_id           => 0 + $a->{user_id},
+    user_name         => $a->{user_name},
+    user_email        => $a->{user_email},
+    decision          => $a->{decision},
+    comment           => $a->{comment},
+    user_role_at_time => $a->{user_role_at_time},
+    created_at        => $a->{created_at},
   };
 }
 

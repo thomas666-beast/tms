@@ -46,6 +46,8 @@ sub register ($self, $app, $conf) {
     return $c->require_auth;
   });
 
+  $authed->get ('/me/dashboard')                    ->to('Me#dashboard');
+  
   $authed->get  ('/projects')                      ->to('Projects#list');
   $authed->get  ('/projects/:id')                  ->to('Projects#show');
   $authed->patch('/projects/:id')                  ->to('Projects#update');
@@ -66,6 +68,17 @@ sub register ($self, $app, $conf) {
   $authed->post ('/files/:id/approve')             ->to('Workflow#approve');
   $authed->post ('/files/:id/reject')              ->to('Workflow#reject');
   $authed->get  ('/files/:id/approvals')           ->to('Workflow#approvals');
+  $authed->post ('/files/:id/assign')          ->to('Files#assign');
+  $authed->post ('/files/:id/unassign')        ->to('Files#unassign');
+
+  $authed->get  ('/notifications')             ->to('Notifications#list');
+  $authed->post ('/notifications/:id/read')    ->to('Notifications#mark_read');
+  $authed->post ('/notifications/read_all')    ->to('Notifications#mark_all_read');
+
+  $authed->post ('/keys/:id/ai_translate')         ->to('AiTranslate#key');
+  $authed->post ('/files/:id/ai_translate')        ->to('AiTranslate#file');
+
+  $authed->get ('/files/:id/export')                ->to('Files#export');
 
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');

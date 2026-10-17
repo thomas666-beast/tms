@@ -1,11 +1,9 @@
 package TMS::Controller::Files;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
+use Mojo::JSON;
 use TMS::Adapter;
 
-# ------------------------------------------------------------
-# POST /api/v1/projects/:id/files
-# ------------------------------------------------------------
 sub upload ($c) {
   my $project_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $project_id =~ /\A\d+\z/;
@@ -43,10 +41,7 @@ sub upload ($c) {
 
   my $upload = $c->req->upload('file');
   return _err($c, 400, 'file_required') unless $upload;
-
-  if (!$upload->size) {
-    return _err($c, 400, 'file_empty');
-  }
+  return _err($c, 400, 'file_empty')    unless $upload->size;
 
   $name = $upload->filename unless defined $name && length $name;
   return _err($c, 400, 'name_required') unless defined $name && length $name;
@@ -83,7 +78,7 @@ sub upload ($c) {
         INSERT INTO files
           (project_id, group_id, name, format, source_lang, target_lang,
            is_source, status, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, false, 'in_progress', ?)
+        VALUES (?, ?, ?, ?, ?, ?, false, 'unassigned', ?)
         RETURNING id, project_id, name, format, source_lang, target_lang, status, created_at
       },
       $project_id, $group_id, $name, $format, $source_lang, $target_lang, $me->{id},
@@ -93,7 +88,7 @@ sub upload ($c) {
       q{
         INSERT INTO file_revisions (file_id, revision_number, status, created_by_user_id)
         VALUES (?, 1, 'open', ?)
-        RETURNING id, revision_number, status, created_at
+        RETURNING id
       },
       $file->{id}, $me->{id},
     )->hash;
@@ -105,10 +100,7 @@ sub upload ($c) {
 
     for my $key_path (sort keys %$parsed) {
       $c->db->query(
-        q{
-          INSERT INTO keys (file_id, key_path, source_text)
-          VALUES (?, ?, ?)
-        },
+        'INSERT INTO keys (file_id, key_path, source_text) VALUES (?, ?, ?)',
         $file->{id}, $key_path, $parsed->{$key_path},
       );
     }
@@ -125,7 +117,6 @@ sub upload ($c) {
     project_id  => 0 + $project_id,
     name        => $file->{name},
     format      => $file->{format},
-    source_lang => $file->{source_lang},
     target_lang => $file->{target_lang},
   });
 
@@ -144,9 +135,6 @@ sub upload ($c) {
   }, status => 201);
 }
 
-# ------------------------------------------------------------
-# GET /api/v1/projects/:id/files
-# ------------------------------------------------------------
 sub list_by_project ($c) {
   my $project_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $project_id =~ /\A\d+\z/;
@@ -181,9 +169,6 @@ sub list_by_project ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# GET /api/v1/files/:id
-# ------------------------------------------------------------
 sub show ($c) {
   my $file_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
@@ -205,7 +190,6 @@ sub show ($c) {
   )->hash;
 
   return _err($c, 404, 'file_not_found') unless $file;
-
   return undef unless $c->can_access_project($file->{project_id});
 
   my $revision = $c->db->query(
@@ -226,9 +210,6 @@ sub show ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# GET /api/v1/files/:id/keys?status=...
-# ------------------------------------------------------------
 sub keys ($c) {
   my $file_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
@@ -238,7 +219,6 @@ sub keys ($c) {
     $file_id,
   )->hash;
   return _err($c, 404, 'file_not_found') unless $file;
-
   return undef unless $c->can_access_project($file->{project_id});
 
   my $status_filter = $c->param('status') // 'all';
@@ -276,7 +256,9 @@ sub keys ($c) {
     if ($status_filter eq 'empty') {
       @$rows = grep { !defined $_->{translation_id} } @$rows;
     } else {
-      @$rows = grep { defined $_->{translation_id} && ($_->{translation_status} // '') eq $status_filter } @$rows;
+      @$rows = grep {
+        defined $_->{translation_id} && ($_->{translation_status} // '') eq $status_filter
+      } @$rows;
     }
   }
 
@@ -290,9 +272,155 @@ sub keys ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# helpers
-# ------------------------------------------------------------
+sub assign ($c) {
+  my $file_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+
+  my $file = $c->db->query(
+    'SELECT id, project_id, status, assigned_to_user_id FROM files WHERE id = ?',
+    $file_id,
+  )->hash;
+  return _err($c, 404, 'file_not_found') unless $file;
+
+  return undef unless $c->can_access_project($file->{project_id});
+
+  my $me = $c->current_user;
+  my $member = $c->project_member($file->{project_id});
+  my $is_project_admin = $me->{role} eq 'admin'
+    || ($member && $member->{role} eq 'admin');
+  return _err($c, 403, 'forbidden') unless $is_project_admin;
+
+  return _err($c, 409, 'file_in_review')
+    if $file->{status} eq 'in_review' || $file->{status} eq 'approved';
+
+  my $body    = $c->req->json || {};
+  my $user_id = $body->{user_id};
+  return _err($c, 400, 'user_id_required')
+    unless defined $user_id && $user_id =~ /\A\d+\z/;
+
+  my $target = $c->db->query(
+    q{
+      SELECT u.id, u.name, u.email, u.is_active, m.role AS project_role
+        FROM users u
+        LEFT JOIN project_members m ON m.user_id = u.id AND m.project_id = ?
+       WHERE u.id = ?
+    },
+    $file->{project_id}, $user_id,
+  )->hash;
+  return _err($c, 404, 'user_not_found') unless $target;
+  return _err($c, 409, 'user_inactive')  unless $target->{is_active};
+  return _err($c, 409, 'user_not_project_member') unless defined $target->{project_role};
+
+  my $prev_id = $file->{assigned_to_user_id};
+
+  $c->db->query(
+    q{
+      UPDATE files
+         SET assigned_to_user_id = ?, status = 'assigned'
+       WHERE id = ?
+    },
+    $user_id, $file_id,
+  );
+
+  $c->db->query(
+    'UPDATE assignments SET unassigned_at = now()
+      WHERE file_id = ? AND unassigned_at IS NULL',
+    $file_id,
+  );
+  $c->db->query(
+    q{INSERT INTO assignments (file_id, user_id, assigned_by) VALUES (?, ?, ?)},
+    $file_id, $user_id, $me->{id},
+  );
+
+  my $project = $c->db->query(
+    'SELECT id, name FROM projects WHERE id = ?',
+    $file->{project_id},
+  )->hash;
+
+  $c->notifier->emit(
+    $user_id, 'file_assigned', 'file', $file_id,
+    {
+      file_id      => 0 + $file_id,
+      project_id   => 0 + $file->{project_id},
+      project_name => $project->{name},
+      actor_name   => $me->{name},
+    },
+  );
+
+  if (defined $prev_id && $prev_id != $user_id) {
+    $c->notifier->emit(
+      $prev_id, 'file_assigned', 'file', $file_id,
+      {
+        file_id      => 0 + $file_id,
+        project_id   => 0 + $file->{project_id},
+        project_name => $project->{name},
+        actor_name   => $me->{name},
+        reassigned   => 1,
+      },
+    );
+  }
+
+  _audit($c, 'file.assign', $file_id, {
+    user_id => 0 + $user_id,
+    prev_id => defined $prev_id ? 0 + $prev_id : undef,
+  });
+
+  $c->render(json => {
+    ok   => 1,
+    file => {
+      id                  => 0 + $file_id,
+      assigned_to_user_id => 0 + $user_id,
+      status              => 'assigned',
+    },
+  });
+}
+
+sub unassign ($c) {
+  my $file_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+
+  my $file = $c->db->query(
+    'SELECT id, project_id, status, assigned_to_user_id FROM files WHERE id = ?',
+    $file_id,
+  )->hash;
+  return _err($c, 404, 'file_not_found') unless $file;
+
+  return undef unless $c->can_access_project($file->{project_id});
+
+  my $me = $c->current_user;
+  my $member = $c->project_member($file->{project_id});
+  my $is_project_admin = $me->{role} eq 'admin'
+    || ($member && $member->{role} eq 'admin');
+  return _err($c, 403, 'forbidden') unless $is_project_admin;
+
+  return _err($c, 409, 'file_in_review')
+    if $file->{status} eq 'in_review' || $file->{status} eq 'approved';
+
+  return _err($c, 409, 'not_assigned') unless defined $file->{assigned_to_user_id};
+
+  my $prev_id = $file->{assigned_to_user_id};
+
+  $c->db->query(
+    "UPDATE files SET assigned_to_user_id = NULL, status = 'unassigned' WHERE id = ?",
+    $file_id,
+  );
+
+  $c->db->query(
+    'UPDATE assignments SET unassigned_at = now()
+      WHERE file_id = ? AND unassigned_at IS NULL',
+    $file_id,
+  );
+
+  _audit($c, 'file.unassign', $file_id, {
+    prev_id => 0 + $prev_id,
+  });
+
+  $c->render(json => {
+    ok   => 1,
+    file => { id => 0 + $file_id, assigned_to_user_id => undef, status => 'unassigned' },
+  });
+}
+
 sub _err ($c, $status, $code, $extra = undef) {
   my %payload = (error => $code);
   $payload{detail} = $extra->{detail} if $extra && defined $extra->{detail};
@@ -301,7 +429,7 @@ sub _err ($c, $status, $code, $extra = undef) {
 }
 
 sub _public_file ($f) {
-  my %out = (
+  return {
     id                  => 0 + $f->{id},
     project_id          => 0 + $f->{project_id},
     group_id            => defined $f->{group_id} ? 0 + $f->{group_id} : undef,
@@ -318,21 +446,20 @@ sub _public_file ($f) {
     assigned_to_email   => $f->{assigned_to_email},
     created_at          => $f->{created_at},
     updated_at          => $f->{updated_at},
-  );
-  return \%out;
+  };
 }
 
 sub _public_key ($r) {
   my %t;
   if (defined $r->{translation_id}) {
-    $t{id}                   = 0 + $r->{translation_id};
-    $t{text}                 = $r->{translation_text};
-    $t{status}               = $r->{translation_status};
-    $t{note}                 = $r->{translation_note};
+    $t{id}                    = 0 + $r->{translation_id};
+    $t{text}                  = $r->{translation_text};
+    $t{status}                = $r->{translation_status};
+    $t{note}                  = $r->{translation_note};
     $t{translated_by_user_id} = defined $r->{translated_by_user_id} ? 0 + $r->{translated_by_user_id} : undef;
-    $t{translated_by_ai}     = $r->{translated_by_ai} ? 1 : 0;
-    $t{ai_engine}            = $r->{ai_engine};
-    $t{created_at}           = $r->{translation_created_at};
+    $t{translated_by_ai}      = $r->{translated_by_ai} ? 1 : 0;
+    $t{ai_engine}             = $r->{ai_engine};
+    $t{created_at}            = $r->{translation_created_at};
   }
 
   return {
@@ -343,7 +470,7 @@ sub _public_key ($r) {
   };
 }
 
-sub _audit ($c, $action, $entity_id, $new) {
+sub _audit ($c, $action, $file_id, $new) {
   my $me = $c->current_user;
   $c->db->query(
     q{
@@ -352,10 +479,109 @@ sub _audit ($c, $action, $entity_id, $new) {
     },
     $me ? $me->{id} : undef,
     $action,
-    $entity_id,
+    $file_id,
     defined $new ? Mojo::JSON::encode_json($new) : undef,
     $c->tx->remote_address,
   );
+}
+
+sub export ($c) {
+  my $file_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
+
+  my $file = $c->db->query(
+    q{
+      SELECT id, project_id, name, format, source_lang, target_lang,
+             current_revision_id
+        FROM files
+       WHERE id = ?
+    },
+    $file_id,
+  )->hash;
+  return _err($c, 404, 'file_not_found') unless $file;
+
+  return undef unless $c->can_access_project($file->{project_id});
+
+  my $revision_mode = $c->param('revision') // 'current';
+  return _err($c, 400, 'invalid_revision')
+    unless $revision_mode =~ /\A(?:current|latest_approved)\z/;
+
+  my $revision_id;
+  if ($revision_mode eq 'current') {
+    $revision_id = $file->{current_revision_id};
+  }
+  else {
+    my $row = $c->db->query(
+      q{
+        SELECT id
+          FROM file_revisions
+         WHERE file_id = ? AND status = 'approved'
+         ORDER BY revision_number DESC
+         LIMIT 1
+      },
+      $file->{id},
+    )->hash;
+    return _err($c, 404, 'no_approved_revision') unless $row;
+    $revision_id = $row->{id};
+  }
+
+  my $adapter = eval { TMS::Adapter->for($file->{format}) };
+  return _err($c, 500, 'adapter_failed') unless $adapter;
+
+  my $keys = $c->db->query(
+    q{
+      SELECT k.key_path, k.source_text,
+             t.text   AS translation_text,
+             t.status AS translation_status
+        FROM keys k
+        LEFT JOIN LATERAL (
+          SELECT text, status
+            FROM translations
+           WHERE key_id = k.id
+             AND revision_id = ?
+             AND language = ?
+           ORDER BY created_at DESC
+           LIMIT 1
+        ) t ON true
+       WHERE k.file_id = ?
+       ORDER BY k.key_path
+    },
+    $revision_id, $file->{target_lang}, $file->{id},
+  )->hashes;
+
+  my %flat;
+  for my $k (@$keys) {
+    my $use = $k->{source_text} // '';
+    if (defined $k->{translation_text}
+        && $k->{translation_status}
+        && $k->{translation_status} =~ /\A(?:translated|approved)\z/) {
+      $use = $k->{translation_text};
+    }
+    $flat{ $k->{key_path} } = $use;
+  }
+
+  my $body;
+  eval { $body = $adapter->serialize(\%flat); 1 }
+    or do {
+      my $err = $@ || 'serialize failed';
+      chomp $err;
+      return _err($c, 500, 'serialize_failed', { detail => $err });
+    };
+
+  my $ext  = $adapter->extension;
+  my $name = $file->{name};
+  $name =~ s/\.[^.]+\z//;    # strip any existing extension
+  $name = $name . '.' . $ext;
+
+  my $content_type = $ext eq 'json' ? 'application/json'
+                   : $ext eq 'php'  ? 'text/x-php'
+                   : $ext eq 'yaml' ? 'text/yaml'
+                   : $ext eq 'arb'  ? 'application/json'
+                   : 'text/plain';
+
+  $c->res->headers->content_type($content_type);
+  $c->res->headers->content_disposition(qq{attachment; filename="$name"});
+  $c->render(data => $body);
 }
 
 1;

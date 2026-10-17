@@ -2,6 +2,7 @@ package TMS::Controller::Auth;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Authen::Passphrase::BlowfishCrypt;
+use Crypt::URandom qw(urandom);
 
 sub login ($c) {
   my $body     = $c->req->json || {};
@@ -111,9 +112,7 @@ sub _public_user ($u) {
 }
 
 sub _new_token {
-  my $hex = '';
-  $hex .= sprintf '%02x', int rand 256 for 1 .. 32;
-  return $hex;
+  return unpack 'H*', urandom(32);
 }
 
 1;
