@@ -29,23 +29,46 @@ sub login ($c) {
   return $c->render(json => { error => 'invalid_credentials' }, status => 401)
     unless $ok;
 
-  my $sid = _new_session_id();
+  # rotate: drop the previous session, if any
+  if (my $old = $c->req->cookie($c->session_cookie_name)) {
+    $c->db->query(
+      'DELETE FROM sessions WHERE id = ?',
+      $old->value,
+    );
+  }
+
+  # opportunistic cleanup of stale sessions
   $c->db->query(
     q{
-      INSERT INTO sessions (id, user_id, ip, user_agent, expires_at)
-      VALUES (?, ?, ?, ?, now() + interval '7 days')
+      DELETE FROM sessions
+       WHERE expires_at < now() - interval '7 days'
+          OR (revoked_at IS NOT NULL AND revoked_at < now() - interval '7 days')
+    },
+  );
+
+  my $sid        = _new_token();
+  my $csrf_token = _new_token();
+
+  $c->db->query(
+    q{
+      INSERT INTO sessions (id, user_id, ip, user_agent, csrf_token, expires_at)
+      VALUES (?, ?, ?, ?, ?, now() + interval '7 days')
     },
     $sid,
     $u->{id},
     $c->tx->remote_address,
     $c->req->headers->user_agent,
+    $csrf_token,
   );
 
   $c->set_session_cookie($sid);
 
   delete $u->{password_hash};
 
-  $c->render(json => { user => _public_user($u) });
+  $c->render(json => {
+    user       => _public_user($u),
+    csrf_token => $csrf_token,
+  });
 }
 
 sub logout ($c) {
@@ -66,7 +89,16 @@ sub logout ($c) {
 sub me ($c) {
   my $u = $c->current_user;
   return $c->render(json => { user => undef }) unless $u;
-  $c->render(json => { user => _public_user($u) });
+
+  my $sid = $c->stash('session_id');
+  my $csrf = defined $sid
+    ? $c->db->query('SELECT csrf_token FROM sessions WHERE id = ?', $sid)->hash->{csrf_token}
+    : undef;
+
+  $c->render(json => {
+    user       => _public_user($u),
+    csrf_token => $csrf,
+  });
 }
 
 sub _public_user ($u) {
@@ -78,7 +110,7 @@ sub _public_user ($u) {
   };
 }
 
-sub _new_session_id {
+sub _new_token {
   my $hex = '';
   $hex .= sprintf '%02x', int rand 256 for 1 .. 32;
   return $hex;
