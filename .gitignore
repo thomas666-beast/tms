@@ -22,4 +22,3 @@ dist/
 # Local DB dumps
 *.dump
 *.sql.gz
-
