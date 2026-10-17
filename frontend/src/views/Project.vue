@@ -40,7 +40,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="f in files" :key="f.id" class="clickable">
+          <tr v-for="f in files" :key="f.id" class="clickable" @click="openFile(f.id)">
             <td>{{ f.name }}</td>
             <td><code>{{ f.format }}</code></td>
             <td>{{ f.target_lang }}</td>
@@ -144,6 +144,10 @@ async function upload() {
 async function onLogout() {
   await auth.logout()
   router.push('/login')
+}
+
+function openFile(id) {
+  router.push(`/files/${id}`)
 }
 
 onMounted(load)

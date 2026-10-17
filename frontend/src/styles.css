@@ -47,3 +47,36 @@ code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
 .list { padding-left: 18px; }
 h2 { font-size: 16px; margin-top: 24px; margin-bottom: 8px; }
 small { color: #666; font-weight: 400; }
+
+.container-wide { max-width: 1200px; margin: 40px auto; padding: 0 16px; }
+.row-actions { display: flex; gap: 8px; align-items: center; }
+.btn-link { background: none; border: 1px solid #333; color: #333; padding: 6px 10px; border-radius: 4px; text-decoration: none; }
+.workflow-bar { display: flex; gap: 8px; align-items: center; margin: 12px 0; }
+button.danger { background: #b00020; border-color: #b00020; }
+.approvals { background: #fff; border: 1px solid #eee; padding: 10px 14px; border-radius: 6px; margin: 12px 0; }
+.approvals ul { margin: 6px 0; padding-left: 18px; }
+.approvals .ok { color: #2e7d32; }
+.approvals .pending { color: #b26a00; }
+.toolbar { display: flex; gap: 12px; align-items: center; margin: 12px 0; }
+.toolbar label { display: flex; gap: 6px; align-items: center; }
+.table-keys { width: 100%; border-collapse: collapse; background: #fff; }
+.table-keys th, .table-keys td {
+  text-align: left; vertical-align: top;
+  padding: 8px 10px; border-bottom: 1px solid #eee;
+}
+.table-keys th { background: #f3f3f3; font-weight: 600; }
+.translation-input { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 13px; resize: vertical; }
+.note-input { width: 100%; padding: 4px 6px; border: 1px solid #f0c070; background: #fff8ec; border-radius: 4px; font-size: 12px; margin-top: 4px; }
+.source { color: #555; font-size: 13px; }
+.badge { background: #eef; padding: 2px 8px; border-radius: 10px; font-size: 12px; display: inline-block; }
+.badge.status-empty        { background: #eee; color: #777; }
+.badge.status-ai_draft     { background: #e3f2fd; color: #1565c0; }
+.badge.status-translated   { background: #e8f5e9; color: #2e7d32; }
+.badge.status-needs_review { background: #fff3e0; color: #b26a00; }
+.badge.status-approved     { background: #c8e6c9; color: #1b5e20; }
+.badge.status-rejected     { background: #ffebee; color: #b00020; }
+button.small { padding: 4px 8px; font-size: 12px; }
+button.ghost { background: #fff; color: #333; }
+.saved { color: #2e7d32; font-size: 11px; margin-left: 4px; }
+tr.row-needs_review { background: #fffdf5; }
+tr.row-approved     { background: #f4fbf4; }
