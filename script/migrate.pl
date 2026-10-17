@@ -85,7 +85,7 @@ for my $file (@files) {
     next;
   }
 
-  print "Applying $file … ";
+  print "Applying $file ... ";
 
   eval {
     $db->query('BEGIN');

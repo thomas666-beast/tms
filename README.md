@@ -51,6 +51,10 @@ Authenticated (any logged-in user):
 - `POST   /api/v1/projects` (global admin only)
 - `PATCH  /api/v1/keys/:id/translation`             (project lead, project admin, or assigned translator; body: `text?`, `status?`, `note?`)
 - `GET    /api/v1/keys/:id/translation/history`
+- `POST   /api/v1/files/:id/submit`          (project lead, project admin, global admin)
+- `POST   /api/v1/files/:id/approve`         (project lead, project admin, global admin; not the file's assigned translator)
+- `POST   /api/v1/files/:id/reject`          (same; requires `comment`)
+- `GET    /api/v1/files/:id/approvals`
 
 ## Local services
 Postgres runs via `docker/docker-compose.services.yml` (optional — any reachable PostgreSQL works).

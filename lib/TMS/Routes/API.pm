@@ -62,6 +62,10 @@ sub register ($self, $app, $conf) {
 
   $authed->patch('/keys/:id/translation')          ->to('Translations#edit');
   $authed->get  ('/keys/:id/translation/history')  ->to('Translations#history');
+  $authed->post ('/files/:id/submit')              ->to('Workflow#submit');
+  $authed->post ('/files/:id/approve')             ->to('Workflow#approve');
+  $authed->post ('/files/:id/reject')              ->to('Workflow#reject');
+  $authed->get  ('/files/:id/approvals')           ->to('Workflow#approvals');
 
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');
