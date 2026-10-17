@@ -99,30 +99,34 @@ sub register ( $self, $app, $conf ) {
   # CSRF: any unsafe /api/v1/* request that carries a session cookie
   #       must present the matching X-CSRF-Token header.
   # ----------------------------------------------------------
-  $app->hook(
-    before_dispatch => sub ($c) {
-      my $method = $c->req->method;
-      return if $method eq 'GET' || $method eq 'HEAD' || $method eq 'OPTIONS';
+  $app->hook(before_dispatch => sub ($c) {
+    my $method = $c->req->method;
+    return if $method eq 'GET' || $method eq 'HEAD' || $method eq 'OPTIONS';
 
-      return unless $c->req->url->path =~ m{^/api/v1/};
+    my $path = $c->req->url->path;
+    return unless $path =~ m{^/api/v1/};
 
-      my $cookie = $c->req->cookie($cookie_name);
-      return unless $cookie && defined $cookie->value && length $cookie->value;
+    # login is exempt: an attacker gains nothing by forcing login,
+    # and legitimate re-login while a session cookie is present must work.
+    return if $method eq 'POST' && $path eq '/api/v1/auth/login';
 
-      my $sid = $cookie->value;
+    my $cookie = $c->req->cookie($cookie_name);
+    return unless $cookie && defined $cookie->value && length $cookie->value;
 
-      my $row = $c->db->query( 'SELECT csrf_token FROM sessions WHERE id = ?', $sid, )->hash;
+    my $sid = $cookie->value;
 
-      my $expected = $row ? $row->{csrf_token} : undef;
-      my $got      = $c->req->headers->header('X-CSRF-Token') // '';
+    my $row = $c->db->query(
+      'SELECT csrf_token FROM sessions WHERE id = ?',
+      $sid,
+    )->hash;
 
-      return $c->render( json => { error => 'csrf_invalid' }, status => 403 )
-        unless defined $expected
-        && length $expected
-        && length $got
-        && secure_compare( $expected, $got );
-    }
-  );
+    my $expected = $row ? $row->{csrf_token} : undef;
+    my $got      = $c->req->headers->header('X-CSRF-Token') // '';
+
+    return $c->render(json => { error => 'csrf_invalid' }, status => 403)
+      unless defined $expected && length $expected && length $got
+          && secure_compare($expected, $got);
+  });
 }
 
 1;
