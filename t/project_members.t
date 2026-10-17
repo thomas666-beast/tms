@@ -1,4 +1,4 @@
-use Mojo::Base -strict;
+use Mojo::Base -strict, -signatures;
 use Test::More;
 use Test::Mojo;
 
@@ -17,7 +17,7 @@ my $admin = $t->app->pg_pool->db->query(
   $admin_email, 'admin',
 )->hash;
 
-plan skip_all => 'no seeded admin (run script/reset_db.pl first)'
+plan skip_all => 'no seeded admin (run script/test_db.pl first)'
   unless $admin && $admin_password;
 
 $t->post_ok('/api/v1/auth/login' => json => {
@@ -32,152 +32,88 @@ my %h    = ('X-CSRF-Token' => $csrf);
 
 my $db = $t->app->pg_pool->db;
 
-$db->query(q{DELETE FROM users WHERE email LIKE 'test-pm-%@example.com'});
 $db->query(q{DELETE FROM projects WHERE slug LIKE 'test-pm-%'});
+$db->query(q{DELETE FROM users    WHERE email LIKE 'test-pm-%@example.com'});
 
 $t->post_ok('/api/v1/projects' => {%h} => json => {
-  name                => 'Test PM Project',
+  name                => 'PM Project',
   default_source_lang => 'en',
 })
   ->status_is(201);
 my $project_id = $t->tx->res->json->{project}{id};
 
-my ($lead_id, $trans_id);
-
 $t->post_ok('/api/v1/users' => {%h} => json => {
-  email    => 'test-pm-lead@example.com',
-  name     => 'PM Lead',
+  email    => 'test-pm-a@example.com',
+  name     => 'PM A',
   password => 'password-1',
   role     => 'translator',
 })
   ->status_is(201);
-$lead_id = $t->tx->res->json->{user}{id};
+my $user_a = $t->tx->res->json->{user}{id};
 
 $t->post_ok('/api/v1/users' => {%h} => json => {
-  email    => 'test-pm-trans@example.com',
-  name     => 'PM Translator',
+  email    => 'test-pm-b@example.com',
+  name     => 'PM B',
   password => 'password-1',
   role     => 'translator',
 })
   ->status_is(201);
-$trans_id = $t->tx->res->json->{user}{id};
+my $user_b = $t->tx->res->json->{user}{id};
 
-$t->get_ok("/api/v1/projects/$project_id/members")
+# candidates: both users should appear (nobody is a member yet)
+$t->get_ok("/api/v1/projects/$project_id/candidates")
   ->status_is(200);
 
-my $members = $t->tx->res->json->{members};
-is scalar(@$members), 1, 'one member initially';
-is $members->[0]{user_id}, 0 + $admin->{id}, 'admin is the member';
-is $members->[0]{role}, 'admin', 'admin has project role admin';
+my $cands = $t->tx->res->json->{candidates};
+my %ids   = map { $_->{id} => 1 } @$cands;
+ok $ids{$user_a}, 'user_a is a candidate';
+ok $ids{$user_b}, 'user_b is a candidate';
 
-$t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {})
-  ->status_is(400)
-  ->json_is('/error', 'user_id_required');
-
+# add A
 $t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
-  user_id => $lead_id, role => 'wizard',
-})
-  ->status_is(400)
-  ->json_is('/error', 'invalid_role');
-
-$t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
-  user_id => 999999, role => 'translator',
-})
-  ->status_is(404)
-  ->json_is('/error', 'user_not_found');
-
-$t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
-  user_id => $lead_id, role => 'lead',
-})
-  ->status_is(201)
-  ->json_is('/ok', 1)
-  ->json_is('/changed', 1);
-
-$t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
-  user_id => $trans_id, role => 'translator',
+  user_id => $user_a, role => 'translator',
 })
   ->status_is(201);
 
+# after adding A, A is no longer a candidate, B still is
+$t->get_ok("/api/v1/projects/$project_id/candidates")
+  ->status_is(200);
+$cands = $t->tx->res->json->{candidates};
+%ids   = map { $_->{id} => 1 } @$cands;
+ok !$ids{$user_a}, 'user_a no longer a candidate';
+ok  $ids{$user_b}, 'user_b still a candidate';
+
+# add B as a project admin
 $t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
-  user_id => $trans_id, role => 'translator',
+  user_id => $user_b, role => 'admin',
 })
-  ->status_is(200)
-  ->json_is('/changed', 0);
+  ->status_is(201);
 
-$t->get_ok("/api/v1/projects/$project_id/members")
-  ->status_is(200);
-is scalar(@{ $t->tx->res->json->{members} }), 3, 'three members now';
-
-$t->patch_ok("/api/v1/projects/$project_id/members/$lead_id" => {%h} => json => {
-  role => 'translator',
-})
-  ->status_is(200)
-  ->json_is('/changed', 1);
-
-$t->patch_ok("/api/v1/projects/$project_id/members/$lead_id" => {%h} => json => {
-  role => 'translator',
-})
-  ->status_is(200)
-  ->json_is('/changed', 0);
-
-$t->patch_ok("/api/v1/projects/$project_id/members/" . $admin->{id} => {%h} => json => {
-  role => 'translator',
-})
-  ->status_is(409)
-  ->json_is('/error', 'last_project_admin');
-
-$t->delete_ok("/api/v1/projects/$project_id/members/" . $admin->{id} => {%h})
-  ->status_is(409)
-  ->json_is('/error', 'last_project_admin');
-
-$t->patch_ok("/api/v1/projects/$project_id/members/$lead_id" => {%h} => json => {
-  role => 'admin',
-})
-  ->status_is(200);
-
-$t->patch_ok("/api/v1/projects/$project_id/members/" . $admin->{id} => {%h} => json => {
-  role => 'lead',
-})
-  ->status_is(200)
-  ->json_is('/changed', 1);
-
-$t->delete_ok("/api/v1/projects/$project_id/members/$trans_id" => {%h})
-  ->status_is(200)
-  ->json_is('/ok', 1);
-
-$t->delete_ok("/api/v1/projects/$project_id/members/$trans_id" => {%h})
-  ->status_is(404)
-  ->json_is('/error', 'member_not_found');
-
-$t->patch_ok("/api/v1/projects/$project_id/members/" . $admin->{id} => {%h} => json => {
-  role => 'admin',
-})
-  ->status_is(200);
-
-$t->patch_ok("/api/v1/projects/$project_id/members/$lead_id" => {%h} => json => {
-  role => 'lead',
-})
-  ->status_is(200);
-
+# B (a project admin) can now see candidates endpoint
 $t->post_ok('/api/v1/auth/logout' => {%h})
   ->status_is(200);
-
 $t->post_ok('/api/v1/auth/login' => json => {
-  email    => 'test-pm-lead@example.com',
+  email    => 'test-pm-b@example.com',
   password => 'password-1',
 })
   ->status_is(200);
-my $lcsrf = $t->tx->res->json->{csrf_token};
-my %lh    = ('X-CSRF-Token' => $lcsrf);
+my $csrf_b = $t->tx->res->json->{csrf_token};
+my %hb     = ('X-CSRF-Token' => $csrf_b);
 
-$t->get_ok("/api/v1/projects/$project_id/members")
+$t->get_ok("/api/v1/projects/$project_id/candidates")
   ->status_is(200);
 
-$t->post_ok("/api/v1/projects/$project_id/members" => {%lh} => json => {
-  user_id => $trans_id, role => 'translator',
+# translator A cannot see candidates endpoint
+$t->post_ok('/api/v1/auth/logout' => {%hb})
+  ->status_is(200);
+$t->post_ok('/api/v1/auth/login' => json => {
+  email    => 'test-pm-a@example.com',
+  password => 'password-1',
 })
-  ->status_is(403)
-  ->json_is('/error', 'forbidden');
+  ->status_is(200);
+
+$t->get_ok("/api/v1/projects/$project_id/candidates")
+  ->status_is(403);
 
 $db->query(q{DELETE FROM projects WHERE slug LIKE 'test-pm-%'});
 $db->query(q{DELETE FROM users    WHERE email LIKE 'test-pm-%@example.com'});

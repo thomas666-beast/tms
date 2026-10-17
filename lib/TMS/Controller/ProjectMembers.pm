@@ -1,12 +1,9 @@
 package TMS::Controller::ProjectMembers;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
-# ------------------------------------------------------------
-# GET /api/v1/projects/:id/members
-# ------------------------------------------------------------
 sub list ($c) {
   my $project_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $project_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $project_id && $project_id =~ /\A\d+\z/;
 
   return undef unless $c->can_access_project($project_id);
 
@@ -30,12 +27,46 @@ sub list ($c) {
   });
 }
 
-# ------------------------------------------------------------
-# POST /api/v1/projects/:id/members  { user_id, role }
-# ------------------------------------------------------------
+sub candidates ($c) {
+  my $project_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless defined $project_id && $project_id =~ /\A\d+\z/;
+
+  return undef unless $c->can_access_project($project_id);
+
+  my $me = $c->current_user;
+  my $member = $c->project_member($project_id);
+  my $is_project_admin = $me->{role} eq 'admin'
+    || ($member && $member->{role} eq 'admin');
+  return _err($c, 403, 'forbidden') unless $is_project_admin;
+
+  my $rows = $c->db->query(
+    q{
+      SELECT u.id, u.email, u.name, u.role, u.is_active
+        FROM users u
+        LEFT JOIN project_members m
+          ON m.user_id = u.id AND m.project_id = ?
+       WHERE u.is_active
+         AND m.user_id IS NULL
+       ORDER BY u.name, u.id
+    },
+    $project_id,
+  )->hashes;
+
+  $c->render(json => {
+    candidates => [ map {
+      {
+        id     => 0 + $_->{id},
+        email  => $_->{email},
+        name   => $_->{name},
+        role   => $_->{role},
+      }
+    } @$rows ],
+  });
+}
+
 sub add ($c) {
   my $project_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $project_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $project_id && $project_id =~ /\A\d+\z/;
 
   return undef unless $c->can_access_project($project_id);
 
@@ -64,7 +95,6 @@ sub add ($c) {
   return _err($c, 404, 'user_not_found') unless $target;
   return _err($c, 409, 'user_inactive') unless $target->{is_active};
 
-  # if the target is already a member: this is a role change
   my $existing = $c->db->query(
     'SELECT role FROM project_members WHERE project_id = ? AND user_id = ?',
     $project_id, $user_id,
@@ -72,7 +102,6 @@ sub add ($c) {
 
   if ($existing) {
     if ($existing->{role} ne $role) {
-      # guard: don't demote the last project admin
       if ($existing->{role} eq 'admin' && $role ne 'admin') {
         my $admins = $c->db->query(
           q{SELECT count(*) AS n FROM project_members WHERE project_id = ? AND role = 'admin' AND user_id <> ?},
@@ -89,7 +118,6 @@ sub add ($c) {
         { user_id => 0 + $user_id, role => $role },
       );
     }
-    # idempotent: no change needed
     return $c->render(json => { ok => 1, changed => 0 });
   }
 
@@ -108,15 +136,13 @@ sub add ($c) {
   $c->render(json => { ok => 1, changed => 1 }, status => 201);
 }
 
-# ------------------------------------------------------------
-# PATCH /api/v1/projects/:id/members/:user_id  { role }
-# ------------------------------------------------------------
 sub update ($c) {
   my $project_id = $c->param('id');
   my $user_id    = $c->param('user_id');
 
   return _err($c, 400, 'invalid_id')
-    unless $project_id =~ /\A\d+\z/ && $user_id =~ /\A\d+\z/;
+    unless defined $project_id && $project_id =~ /\A\d+\z/
+        && defined $user_id    && $user_id    =~ /\A\d+\z/;
 
   return undef unless $c->can_access_project($project_id);
 
@@ -164,15 +190,13 @@ sub update ($c) {
   $c->render(json => { ok => 1, changed => 1 });
 }
 
-# ------------------------------------------------------------
-# DELETE /api/v1/projects/:id/members/:user_id
-# ------------------------------------------------------------
 sub remove ($c) {
   my $project_id = $c->param('id');
   my $user_id    = $c->param('user_id');
 
   return _err($c, 400, 'invalid_id')
-    unless $project_id =~ /\A\d+\z/ && $user_id =~ /\A\d+\z/;
+    unless defined $project_id && $project_id =~ /\A\d+\z/
+        && defined $user_id    && $user_id    =~ /\A\d+\z/;
 
   return undef unless $c->can_access_project($project_id);
 
@@ -212,9 +236,6 @@ sub remove ($c) {
   $c->render(json => { ok => 1 });
 }
 
-# ------------------------------------------------------------
-# helpers
-# ------------------------------------------------------------
 sub _err ($c, $status, $code) {
   $c->render(json => { error => $code }, status => $status);
   return undef;

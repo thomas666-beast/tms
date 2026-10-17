@@ -14,7 +14,7 @@
 
       <div class="row">
         <h2>{{ t('projects.members') }}</h2>
-        <button v-if="isGlobalAdmin" @click="startAddMember" class="primary">
+        <button v-if="canManageMembers" @click="startAddMember" class="primary">
           {{ t('projects.addMember') }}
         </button>
       </div>
@@ -26,7 +26,7 @@
             {{ t('projects.memberUser') }}
             <select v-model="newMember.user_id">
               <option value="">—</option>
-              <option v-for="u in addableUsers" :key="u.id" :value="u.id">
+              <option v-for="u in candidates" :key="u.id" :value="u.id">
                 {{ u.name }} ({{ u.email }})
               </option>
             </select>
@@ -53,7 +53,7 @@
           {{ m.name }} <small>&lt;{{ m.email }}&gt;</small>
           — <span class="badge">{{ m.role }}</span>
           <button
-            v-if="isGlobalAdmin && m.user_id !== auth.user?.id"
+            v-if="canManageMembers && m.user_id !== auth.user?.id"
             @click="removeMember(m.user_id)"
             class="small ghost"
           >{{ t('projects.removeMember') }}</button>
@@ -109,7 +109,7 @@ const route = useRoute()
 const project = ref(null)
 const members = ref([])
 const files = ref([])
-const allUsers = ref([])
+const candidates = ref([])
 const loading = ref(true)
 const error = ref('')
 const uploading = ref(false)
@@ -119,17 +119,14 @@ const addingMember = ref(false)
 const newMember = reactive({ user_id: '', role: 'translator' })
 
 const isGlobalAdmin = computed(() => auth.user?.role === 'admin')
-
-const canManageFiles = computed(() => {
-  if (isGlobalAdmin.value) return true
+const myProjectRole = computed(() => {
   const me = members.value.find(m => m.user_id === auth.user?.id)
-  return me?.role === 'admin'
+  return me?.role || null
 })
-
-const addableUsers = computed(() => {
-  const existing = new Set(members.value.map(m => m.user_id))
-  return allUsers.value.filter(u => !existing.has(u.id))
-})
+const canManageMembers = computed(() =>
+  isGlobalAdmin.value || myProjectRole.value === 'admin')
+const canManageFiles = computed(() =>
+  isGlobalAdmin.value || myProjectRole.value === 'admin')
 
 async function load() {
   loading.value = true
@@ -152,12 +149,10 @@ async function load() {
 }
 
 async function startAddMember() {
-  if (!allUsers.value.length) {
-    try {
-      const data = await api.get('/api/v1/users')
-      allUsers.value = data.users || []
-    } catch (e) { error.value = e.message; return }
-  }
+  try {
+    const data = await api.get(`/api/v1/projects/${route.params.id}/candidates`)
+    candidates.value = data.candidates || []
+  } catch (e) { error.value = e.message; return }
   addingMember.value = true
   newMember.user_id = ''
   newMember.role = 'translator'

@@ -47,11 +47,12 @@ sub register ($self, $app, $conf) {
   });
 
   $authed->get ('/me/dashboard')                    ->to('Me#dashboard');
-  
+
   $authed->get  ('/projects')                      ->to('Projects#list');
   $authed->get  ('/projects/:id')                  ->to('Projects#show');
   $authed->patch('/projects/:id')                  ->to('Projects#update');
 
+  $authed->get ('/projects/:id/candidates')        ->to('ProjectMembers#candidates');
   $authed->get  ('/projects/:id/members')          ->to('ProjectMembers#list');
   $authed->post ('/projects/:id/members')          ->to('ProjectMembers#add');
   $authed->patch('/projects/:id/members/:user_id') ->to('ProjectMembers#update');
