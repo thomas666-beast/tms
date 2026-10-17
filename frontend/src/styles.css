@@ -27,3 +27,23 @@ header {
 }
 .error { color: #b00020; margin-top: 8px; }
 a { color: #0057b8; }
+
+.row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-bottom: 12px;
+}
+button.primary { background: #0057b8; border-color: #0057b8; }
+.table { width: 100%; border-collapse: collapse; background: #fff; }
+.table th, .table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee;
+}
+.table th { background: #f3f3f3; font-weight: 600; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: #f7faff; }
+code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
+.badge {
+  background: #eef; padding: 1px 6px; border-radius: 10px; font-size: 12px;
+}
+.list { padding-left: 18px; }
+h2 { font-size: 16px; margin-top: 24px; margin-bottom: 8px; }
+small { color: #666; font-weight: 400; }

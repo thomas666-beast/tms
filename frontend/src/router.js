@@ -5,6 +5,7 @@ const routes = [
   { path: '/login', name: 'login', component: () => import('./views/Login.vue'), meta: { public: true } },
   { path: '/', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
   { path: '/projects', name: 'projects', component: () => import('./views/Projects.vue') },
+  { path: '/projects/:id', name: 'project', component: () => import('./views/Project.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 
