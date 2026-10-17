@@ -26,18 +26,18 @@ $t->get_ok('/api/v1/health')
   ->json_has('/time');
 
 # ------------------------------------------------------------
-# auth flow with CSRF
+# auth + CSRF
 # ------------------------------------------------------------
 SKIP: {
   my $admin = $t->app->pg_pool->db->query(
-    "SELECT id FROM users WHERE email = ? AND is_active",
+    'SELECT id FROM users WHERE email = ? AND is_active',
     $admin_email,
   )->hash;
 
-  skip 'no seeded admin (run script/reset_db.pl first)', 24
+  skip 'no seeded admin (run script/reset_db.pl first)', 30
     unless $admin && $admin_password;
 
-  # wrong password
+  # --- wrong password
   $t->post_ok('/api/v1/auth/login' => json => {
     email    => $admin_email,
     password => 'wrong-password',
@@ -45,7 +45,7 @@ SKIP: {
     ->status_is(401)
     ->json_is('/error', 'invalid_credentials');
 
-  # correct password — capture CSRF token
+  # --- correct password: capture csrf
   my $csrf;
   $t->post_ok('/api/v1/auth/login' => json => {
     email    => $admin_email,
@@ -60,24 +60,29 @@ SKIP: {
   $csrf = $t->tx->res->json->{csrf_token};
   ok(defined $csrf && length $csrf, 'csrf token present');
 
-  # me returns same CSRF token
+  # --- me echoes the same csrf
   $t->get_ok('/api/v1/auth/me')
     ->status_is(200)
     ->json_is('/user/email', $admin_email)
     ->json_is('/user/role',  'admin')
     ->json_is('/csrf_token', $csrf);
 
-  # mutation without CSRF header → 403
+  # --- logout without header → 403
   $t->post_ok('/api/v1/auth/logout')
     ->status_is(403)
     ->json_is('/error', 'csrf_invalid');
 
-  # mutation with CSRF header → 200
+  # --- logout with WRONG header → 403
+  $t->post_ok('/api/v1/auth/logout' => { 'X-CSRF-Token' => 'bogus' })
+    ->status_is(403)
+    ->json_is('/error', 'csrf_invalid');
+
+  # --- logout with correct header → 200
   $t->post_ok('/api/v1/auth/logout' => { 'X-CSRF-Token' => $csrf })
     ->status_is(200)
     ->json_is('/ok', 1);
 
-  # after logout, me returns null user
+  # --- after logout, me returns null user
   $t->get_ok('/api/v1/auth/me')
     ->status_is(200)
     ->json_is('/user', undef);

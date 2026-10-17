@@ -1,6 +1,8 @@
 package TMS::Plugin::Auth;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
+use Mojo::Util qw(secure_compare);
+
 sub register ($self, $app, $conf) {
   my $cookie_name = $conf->{cookie_name} // 'tms_session';
 
@@ -34,7 +36,7 @@ sub register ($self, $app, $conf) {
   });
 
   # ----------------------------------------------------------
-  # current_user — loads from DB once per request
+  # current_user
   # ----------------------------------------------------------
   $app->helper(current_user => sub ($c) {
     return $c->stash('current_user') if exists $c->stash->{current_user};
@@ -84,21 +86,19 @@ sub register ($self, $app, $conf) {
   });
 
   # ----------------------------------------------------------
-  # CSRF enforcement on unsafe methods
+  # CSRF: any unsafe /api/v1/* request that carries a session cookie
+  #       must present the matching X-CSRF-Token header.
   # ----------------------------------------------------------
   $app->hook(before_dispatch => sub ($c) {
     my $method = $c->req->method;
     return if $method eq 'GET' || $method eq 'HEAD' || $method eq 'OPTIONS';
 
-    # only protect /api/v1/* ; static files / future HTML routes are unaffected
     return unless $c->req->url->path =~ m{^/api/v1/};
 
-    my $u = $c->current_user;
-    return unless $u;   # unauthenticated requests are not CSRF-protected (login/logout are public)
+    my $cookie = $c->req->cookie($cookie_name);
+    return unless $cookie && defined $cookie->value && length $cookie->value;
 
-    my $sid = $c->stash('session_id');
-    return $c->render(json => { error => 'csrf_missing_session' }, status => 403)
-      unless defined $sid;
+    my $sid = $cookie->value;
 
     my $row = $c->db->query(
       'SELECT csrf_token FROM sessions WHERE id = ?',
@@ -109,7 +109,8 @@ sub register ($self, $app, $conf) {
     my $got      = $c->req->headers->header('X-CSRF-Token') // '';
 
     return $c->render(json => { error => 'csrf_invalid' }, status => 403)
-      unless defined $expected && length $expected && $expected eq $got;
+      unless defined $expected && length $expected && length $got
+          && secure_compare($expected, $got);
   });
 }
 
