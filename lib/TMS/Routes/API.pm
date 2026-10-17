@@ -63,6 +63,8 @@ sub register ($self, $app, $conf) {
   $authed->get  ('/files/:id')                     ->to('Files#show');
   $authed->get  ('/files/:id/keys')                ->to('Files#keys');
 
+  $authed->get  ('/ai/engines')                     ->to('AiTranslate#engines');
+
   $authed->patch('/keys/:id/translation')          ->to('Translations#edit');
   $authed->get  ('/keys/:id/translation/history')  ->to('Translations#history');
   $authed->post ('/files/:id/submit')              ->to('Workflow#submit');
@@ -80,6 +82,8 @@ sub register ($self, $app, $conf) {
   $authed->post ('/files/:id/ai_translate')        ->to('AiTranslate#file');
 
   $authed->get ('/files/:id/export')                ->to('Files#export');
+
+  $authed->get ('/formats')                          ->to('Formats#list');
 
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');

@@ -27,14 +27,8 @@
       <div v-else class="form-box">
         <h3>{{ t('projects.editTitle') }}</h3>
         <div class="form-grid">
-          <label>
-            {{ t('projects.editName') }}
-            <input v-model="editDraft.name" />
-          </label>
-          <label>
-            {{ t('projects.editLang') }}
-            <input v-model="editDraft.default_source_lang" />
-          </label>
+          <label>{{ t('projects.editName') }}<input v-model="editDraft.name" /></label>
+          <label>{{ t('projects.editLang') }}<input v-model="editDraft.default_source_lang" /></label>
         </div>
         <div class="row-actions">
           <button @click="saveEdit" :disabled="busy" class="primary">{{ t('projects.editSave') }}</button>
@@ -110,9 +104,51 @@
 
       <div class="row" style="margin-top: 32px;">
         <h2>{{ t('projects.files') }}</h2>
-        <button v-if="canManageFiles" @click="upload" :disabled="uploading" class="primary">
-          {{ uploading ? t('files.uploading') : t('files.upload') }}
+        <button v-if="canManageFiles && !uploadingFile" @click="startUpload" class="primary">
+          {{ t('files.upload') }}
         </button>
+      </div>
+
+      <div v-if="uploadingFile" class="form-box">
+        <h3>{{ t('files.uploadTitle') }}</h3>
+        <div class="form-grid">
+          <label>
+            {{ t('files.uploadFormat') }}
+            <select v-model="uploadDraft.format">
+              <option v-if="!formats.length" value="">—</option>
+              <option v-for="f in formats" :key="f.code" :value="f.code">
+                {{ f.label }} (.{{ f.file_ext }})
+              </option>
+            </select>
+          </label>
+          <label>
+            {{ t('files.uploadTarget') }}
+            <input v-model="uploadDraft.target" list="target-langs" placeholder="fr" />
+            <datalist id="target-langs">
+              <option value="fr" /><option value="de" />
+              <option value="es" /><option value="it" />
+              <option value="pt" /><option value="ar" />
+              <option value="ru" /><option value="zh" />
+              <option value="ja" /><option value="ko" />
+            </datalist>
+          </label>
+          <label>
+            {{ t('files.uploadName') }}
+            <input v-model="uploadDraft.name" placeholder="auth.php" />
+          </label>
+          <label>
+            File
+            <input ref="fileInput" type="file" />
+          </label>
+        </div>
+        <div class="row-actions">
+          <button
+            @click="submitUpload"
+            :disabled="!uploadDraft.format || !uploadDraft.target || !fileInput?.files?.length || uploading"
+            class="primary"
+          >{{ uploading ? t('files.uploading') : t('files.uploadSubmit') }}</button>
+          <button @click="cancelUpload" class="ghost">{{ t('files.uploadCancel') }}</button>
+        </div>
       </div>
 
       <div v-if="files.length === 0" class="empty-block">
@@ -162,6 +198,7 @@ const project = ref(null)
 const members = ref([])
 const files = ref([])
 const candidates = ref([])
+const formats = ref([])
 const loading = ref(true)
 const error = ref('')
 const uploading = ref(false)
@@ -173,6 +210,10 @@ const editDraft = reactive({ name: '', default_source_lang: '' })
 const addingMember = ref(false)
 const newMember = reactive({ user_id: '', role: 'translator' })
 
+const uploadingFile = ref(false)
+const fileInput = ref(null)
+const uploadDraft = reactive({ format: '', target: '', name: '' })
+
 const isGlobalAdmin = computed(() => auth.user?.role === 'admin')
 const myProjectRole = computed(() => {
   const me = members.value.find(m => m.user_id === auth.user?.id)
@@ -182,6 +223,15 @@ const canManageMembers = computed(() =>
   isGlobalAdmin.value || myProjectRole.value === 'admin')
 const canManageFiles = computed(() =>
   isGlobalAdmin.value || myProjectRole.value === 'admin')
+
+async function loadFormats() {
+  if (formats.value.length) return
+  try {
+    const data = await api.get('/api/v1/formats')
+    formats.value = data.formats || []
+    if (formats.value.length) uploadDraft.format = formats.value[0].code
+  } catch (_) { /* ignore */ }
+}
 
 async function load() {
   loading.value = true
@@ -193,6 +243,7 @@ async function load() {
     members.value = data.members || []
     const fl = await api.get(`/api/v1/projects/${id}/files`)
     files.value = fl.files || []
+    await loadFormats()
   } catch (e) {
     if (e.status === 401) return router.push('/login')
     if (e.status === 403) error.value = t('common.forbidden')
@@ -260,42 +311,46 @@ async function removeMember(userId) {
 
 function openFile(id) { router.push(`/files/${id}`) }
 
-async function upload() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.onchange = async () => {
-    const file = input.files?.[0]
-    if (!file) return
-    const format = window.prompt(t('files.promptFormat'), 'laravel')
-    if (!format) return
-    const target = window.prompt(t('files.promptTarget'), 'fr')
-    if (!target) return
+async function startUpload() {
+  await loadFormats()
+  uploadingFile.value = true
+  uploadDraft.target = uploadDraft.target || ''
+  uploadDraft.name = ''
+}
 
+function cancelUpload() {
+  uploadingFile.value = false
+  uploadDraft.name = ''
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+async function submitUpload() {
+  const file = fileInput.value?.files?.[0]
+  if (!file) return
+  uploading.value = true
+  error.value = ''
+  try {
     const fd = new FormData()
     fd.append('file', file)
-    fd.append('format', format)
+    fd.append('format', uploadDraft.format)
     fd.append('source_lang', project.value.default_source_lang)
-    fd.append('target_lang', target)
-    fd.append('name', file.name)
+    fd.append('target_lang', uploadDraft.target)
+    fd.append('name', uploadDraft.name || file.name)
 
-    uploading.value = true
-    error.value = ''
-    try {
-      const res = await fetch(`/api/v1/projects/${route.params.id}/files`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'X-CSRF-Token': auth.csrf_token },
-        body: fd,
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        throw new Error(j.error || `HTTP ${res.status}`)
-      }
-      await load()
-    } catch (e) { error.value = e.message }
-    finally { uploading.value = false }
-  }
-  input.click()
+    const res = await fetch(`/api/v1/projects/${route.params.id}/files`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': auth.csrf_token },
+      body: fd,
+    })
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}))
+      throw new Error(j.error || `HTTP ${res.status}`)
+    }
+    cancelUpload()
+    await load()
+  } catch (e) { error.value = e.message }
+  finally { uploading.value = false }
 }
 
 onMounted(load)

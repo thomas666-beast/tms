@@ -151,8 +151,14 @@
           {{ t('files.detail.search') }}
           <input v-model="search" placeholder="key or source" />
         </label>
-        <button v-if="canAiBulk" @click="aiBulk" :disabled="busy">
-          {{ t('files.detail.aiTranslateAll') }}
+        <label v-if="aiEnabled">
+          {{ t('files.detail.aiEngine') }}
+          <select v-model="selectedEngine">
+            <option v-for="e in enabledEngines" :key="e.name" :value="e.name">{{ e.label }}</option>
+          </select>
+        </label>
+        <button v-if="canAiBulk && aiEnabled" @click="aiBulk" :disabled="busy || bulkRunning">
+          {{ bulkRunning ? t('files.detail.aiRunning') : t('files.detail.aiTranslateAll') }}
         </button>
       </div>
 
@@ -189,7 +195,7 @@
                 <button v-if="canEdit(k)" @click="save(k)" :disabled="busy" class="small">
                   {{ t('files.detail.save') }}
                 </button>
-                <button v-if="canEdit(k)" @click="aiOne(k)" :disabled="busy" class="small ghost">
+                <button v-if="canEdit(k) && aiEnabled" @click="aiOne(k)" :disabled="busy || bulkRunning" class="small ghost">
                   {{ t('files.detail.ai') }}
                 </button>
                 <span v-if="draft[k.id].savedAt" class="saved">✓</span>
@@ -198,6 +204,10 @@
           </tbody>
         </table>
       </div>
+
+      <p v-if="!aiEnabled" class="muted small-text">
+        {{ t('files.detail.aiDisabled') }}
+      </p>
     </template>
   </div>
 </template>
@@ -222,6 +232,11 @@ const approvalStats = ref({ approve_count: 0, quorum_met: 0, has_admin: 0 })
 const members = ref([])
 const project = ref(null)
 const previousRevisionId = ref(null)
+
+const engines = ref([])
+const selectedEngine = ref(localStorage.getItem('tms.aiEngine') || 'libretranslate')
+const bulkRunning = ref(false)
+const bulkProgress = ref({ done: 0, total: 0 })
 
 const loading = ref(true)
 const busy = ref(false)
@@ -249,6 +264,9 @@ const revisionOpen = computed(() => revision.value?.status === 'open')
 const canManageAssignment = computed(() => isProjectAdmin.value)
 const assignableMembers = computed(() =>
   members.value.filter(m => m.role === 'translator' || m.role === 'lead'))
+
+const enabledEngines = computed(() => engines.value.filter(e => e.enabled))
+const aiEnabled = computed(() => enabledEngines.value.length > 0)
 
 function canEdit(k) {
   if (!revisionOpen.value) return false
@@ -278,6 +296,16 @@ function errMsg(e) {
   return e.message
 }
 
+async function loadEngines() {
+  try {
+    const data = await api.get('/api/v1/ai/engines')
+    engines.value = data.engines || []
+    if (aiEnabled.value && !enabledEngines.value.find(e => e.name === selectedEngine.value)) {
+      selectedEngine.value = enabledEngines.value[0].name
+    }
+  } catch (_) { /* ignore */ }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -291,6 +319,7 @@ async function load() {
     project.value = proj.project
     members.value = proj.members || []
 
+    await loadEngines()
     await reload()
 
     if (revision.value?.status === 'in_review') {
@@ -339,6 +368,10 @@ async function reload() {
   }
 }
 
+function rememberEngine() {
+  if (selectedEngine.value) localStorage.setItem('tms.aiEngine', selectedEngine.value)
+}
+
 async function assign() {
   if (!assignChoice.value) return
   busy.value = true
@@ -380,10 +413,11 @@ async function save(k) {
 }
 
 async function aiOne(k) {
+  rememberEngine()
   busy.value = true
   error.value = ''
   try {
-    const data = await api.post(`/api/v1/keys/${k.id}/ai_translate`, { engine: 'libretranslate' })
+    const data = await api.post(`/api/v1/keys/${k.id}/ai_translate`, { engine: selectedEngine.value })
     k.translation = data.translation
     draft[k.id].text = data.translation.text || ''
     draft[k.id].status = data.translation.status
@@ -393,14 +427,19 @@ async function aiOne(k) {
 }
 
 async function aiBulk() {
-  busy.value = true
+  rememberEngine()
+  bulkRunning.value = true
+  bulkProgress.value = { done: 0, total: 0 }
   error.value = ''
   try {
-    const data = await api.post(`/api/v1/files/${file.value.id}/ai_translate`, { engine: 'libretranslate' })
+    const data = await api.post(`/api/v1/files/${file.value.id}/ai_translate`, { engine: selectedEngine.value })
+    bulkProgress.value = {
+      done: (data.translated || 0) + (data.needs_review || 0) + (data.errors || 0),
+      total: data.total || 0,
+    }
     await reload()
-    alert(`Translated ${data.translated}, needs review ${data.needs_review}, errors ${data.errors}`)
   } catch (e) { error.value = errMsg(e) }
-  finally { busy.value = false }
+  finally { bulkRunning.value = false }
 }
 
 async function submit() {
