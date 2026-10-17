@@ -1,16 +1,18 @@
 <template>
   <div class="container">
-    <h1>Sign in</h1>
+    <h1>{{ t('login.title') }}</h1>
     <form @submit.prevent="submit">
       <label>
-        Email
+        {{ t('login.email') }}
         <input v-model="email" type="email" required autocomplete="username" />
       </label>
       <label>
-        Password
+        {{ t('login.password') }}
         <input v-model="password" type="password" required autocomplete="current-password" />
       </label>
-      <button type="submit" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+      <button type="submit" :disabled="busy">
+        {{ busy ? t('login.busy') : t('login.submit') }}
+      </button>
       <p v-if="error" class="error">{{ error }}</p>
     </form>
   </div>
@@ -19,8 +21,10 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()

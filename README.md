@@ -74,3 +74,9 @@ Postgres runs via `docker/docker-compose.services.yml` (optional — any reachab
 Backend must be running: `carton exec -- morbo script/tms`.
 
 Production build (`npm run build`) writes to `public/app/` — backend static serving is added in a later task.
+
+### i18n
+
+All UI strings live in `frontend/src/i18n/<locale>.js`.
+Currently only `en` is present. To add a language, create `frontend/src/i18n/xx.js`
+with the same keys, and register it in `frontend/src/i18n/index.js` (`SUPPORTED`).
