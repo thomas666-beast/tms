@@ -49,6 +49,8 @@ Authenticated (any logged-in user):
 - `GET    /api/v1/projects/:id`
 - `PATCH  /api/v1/projects/:id` (project admin or global admin)
 - `POST   /api/v1/projects` (global admin only)
+- `PATCH  /api/v1/keys/:id/translation`             (project lead, project admin, or assigned translator; body: `text?`, `status?`, `note?`)
+- `GET    /api/v1/keys/:id/translation/history`
 
 ## Local services
 Postgres runs via `docker/docker-compose.services.yml` (optional — any reachable PostgreSQL works).

@@ -60,6 +60,9 @@ sub register ($self, $app, $conf) {
   $authed->get  ('/files/:id')                     ->to('Files#show');
   $authed->get  ('/files/:id/keys')                ->to('Files#keys');
 
+  $authed->patch('/keys/:id/translation')          ->to('Translations#edit');
+  $authed->get  ('/keys/:id/translation/history')  ->to('Translations#history');
+
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');
   });
