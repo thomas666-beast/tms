@@ -55,6 +55,8 @@ sub register ($self, $app, $conf) {
   $authed->patch('/projects/:id/members/:user_id') ->to('ProjectMembers#update');
   $authed->delete  ('/projects/:id/members/:user_id') ->to('ProjectMembers#remove');
 
+  $authed->post ('/projects/:id/files')            ->to('Files#upload');
+
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');
   });
