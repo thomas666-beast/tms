@@ -95,6 +95,35 @@ sub register ( $self, $app, $conf ) {
     }
   );
 
+    # ----------------------------------------------------------
+  # project_member($project_id) → row or undef
+  # ----------------------------------------------------------
+  $app->helper(project_member => sub ($c, $project_id) {
+    my $u = $c->current_user or return undef;
+    return $c->db->query(
+      'SELECT role FROM project_members WHERE project_id = ? AND user_id = ?',
+      $project_id, $u->{id},
+    )->hash;
+  });
+
+  # ----------------------------------------------------------
+  # can_access_project($project_id) → 1 or undef (renders 403)
+  # global admins bypass membership
+  # ----------------------------------------------------------
+  $app->helper(can_access_project => sub ($c, $project_id) {
+    my $u = $c->current_user;
+    return $c->render(json => { error => 'unauthorized' }, status => 401)
+      unless $u;
+
+    return 1 if $u->{role} eq 'admin';
+
+    my $member = $c->project_member($project_id);
+    return 1 if $member;
+
+    $c->render(json => { error => 'forbidden' }, status => 403);
+    return undef;
+  });
+
   # ----------------------------------------------------------
   # CSRF: any unsafe /api/v1/* request that carries a session cookie
   #       must present the matching X-CSRF-Token header.

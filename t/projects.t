@@ -4,6 +4,7 @@ use Test::Mojo;
 
 use FindBin;
 use lib "$FindBin::Bin/../lib";
+require "$FindBin::Bin/testlib.pl";
 use TMS;
 
 my $t = Test::Mojo->new('TMS');

@@ -4,9 +4,6 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 sub register ($self, $app, $conf) {
   my $r = $app->routes;
 
-  # ----------------------------------------------------------
-  # public root + health
-  # ----------------------------------------------------------
   $r->get('/')->to(cb => sub ($c) {
     $c->render(json => {
       app     => $app->{app_name},
@@ -39,23 +36,30 @@ sub register ($self, $app, $conf) {
     });
   });
 
-  # ----------------------------------------------------------
-  # /api/v1 (all under here)
-  # ----------------------------------------------------------
   my $api = $r->under('/api/v1');
 
-  # public: login/logout/me
   $api->post('/auth/login')->to('Auth#login');
   $api->post('/auth/logout')->to('Auth#logout');
   $api->get ('/auth/me')  ->to('Auth#me');
 
-  # ----------------------------------------------------------
-  # admin-only: users
-  # ----------------------------------------------------------
+  my $authed = $api->under(sub ($c) {
+    return $c->require_auth;
+  });
+
+  $authed->get  ('/projects')                      ->to('Projects#list');
+  $authed->get  ('/projects/:id')                  ->to('Projects#show');
+  $authed->patch('/projects/:id')                  ->to('Projects#update');
+
+  $authed->get  ('/projects/:id/members')          ->to('ProjectMembers#list');
+  $authed->post ('/projects/:id/members')          ->to('ProjectMembers#add');
+  $authed->patch('/projects/:id/members/:user_id') ->to('ProjectMembers#update');
+  $authed->delete  ('/projects/:id/members/:user_id') ->to('ProjectMembers#remove');
+
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');
   });
 
+  $admin->post ('/projects')          ->to('Projects#create');
   $admin->get  ('/users')             ->to('Users#list');
   $admin->post ('/users')             ->to('Users#create');
   $admin->patch('/users/:id')         ->to('Users#update');
