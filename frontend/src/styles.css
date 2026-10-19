@@ -1042,3 +1042,19 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
   border-top: 1px solid var(--border);
   background: #f9fafb;
 }
+
+.history-row td {
+  background: #fafbff;
+  border-top: 1px solid var(--border);
+}
+.history-panel { padding: 8px 0 4px 0; }
+.history-panel h4 { margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.history-panel .table { box-shadow: none; }
+.history-text { font-size: 13px; color: var(--text-2); max-width: 480px; white-space: pre-wrap; }
+.review-history-toggle { margin-top: 6px; }
+.small-chip { font-size: 10px; padding: 1px 6px; }
+.badge.action-translate { background: #eef2ff; color: #3730a3; }
+.badge.action-correct   { background: #fef3c7; color: #b45309; }
+.badge.action-validate  { background: #f3f4f6; color: var(--muted); }
+.badge.action-self_edit { background: #f3f4f6; color: var(--muted); }
+.badge.action-ai_draft  { background: #eff6ff; color: #2563eb; }

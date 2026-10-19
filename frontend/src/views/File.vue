@@ -152,6 +152,12 @@
                   </span>
                 </div>
               </div>
+              <div class="review-history-toggle">
+                <button class="small ghost" @click="toggleHistory(k.id)">
+                  {{ t('files.detail.historyLink', { n: historyCounts[k.id] ?? '·' }) }}
+                </button>
+              </div>
+              <HistoryPanel v-if="openHistories[k.id]" :events="historyFor[k.id] || []" />
             </div>
           </div>
         </div>
@@ -225,44 +231,54 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="k in keys" :key="k.id" :class="rowClass(k)">
-              <td><code>{{ k.key_path }}</code></td>
-              <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
-              <td>
-                <textarea
-                  v-model="draft[k.id].text"
-                  :disabled="!canEdit(k) || bulkRunning"
-                  rows="2"
-                  class="translation-input"
-                ></textarea>
-                <input
-                  v-if="draft[k.id].status === 'needs_review'"
-                  v-model="draft[k.id].note"
-                  class="note-input"
-                  :placeholder="t('files.detail.note')"
-                  :disabled="!canEdit(k) || bulkRunning"
-                />
-              </td>
-              <td>
-                <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
-                  {{ statusLabel(k.translation?.status) }}
-                </span>
-              </td>
-              <td class="row-actions-cell">
-                <button v-if="canEdit(k)" @click="save(k)" :disabled="busy || bulkRunning" class="small">
-                  {{ t('files.detail.save') }}
-                </button>
-                <button
-                  v-if="canEdit(k) && aiEnabled"
-                  @click="aiOne(k)"
-                  :disabled="busy || bulkRunning"
-                  class="small ghost"
-                >
-                  {{ t('files.detail.ai') }}
-                </button>
-                <span v-if="draft[k.id].savedAt" class="saved">✓</span>
-              </td>
-            </tr>
+            <template v-for="k in keys" :key="k.id">
+              <tr :class="rowClass(k)">
+                <td><code>{{ k.key_path }}</code></td>
+                <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
+                <td>
+                  <textarea
+                    v-model="draft[k.id].text"
+                    :disabled="!canEdit(k) || bulkRunning"
+                    rows="2"
+                    class="translation-input"
+                  ></textarea>
+                  <input
+                    v-if="draft[k.id].status === 'needs_review'"
+                    v-model="draft[k.id].note"
+                    class="note-input"
+                    :placeholder="t('files.detail.note')"
+                    :disabled="!canEdit(k) || bulkRunning"
+                  />
+                </td>
+                <td>
+                  <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
+                    {{ statusLabel(k.translation?.status) }}
+                  </span>
+                </td>
+                <td class="row-actions-cell">
+                  <button v-if="canEdit(k)" @click="save(k)" :disabled="busy || bulkRunning" class="small">
+                    {{ t('files.detail.save') }}
+                  </button>
+                  <button
+                    v-if="canEdit(k) && aiEnabled"
+                    @click="aiOne(k)"
+                    :disabled="busy || bulkRunning"
+                    class="small ghost"
+                  >
+                    {{ t('files.detail.ai') }}
+                  </button>
+                  <button class="small ghost" @click="toggleHistory(k.id)">
+                    {{ t('files.detail.historyLink', { n: historyCounts[k.id] ?? '·' }) }}
+                  </button>
+                  <span v-if="draft[k.id].savedAt" class="saved">✓</span>
+                </td>
+              </tr>
+              <tr v-if="openHistories[k.id]" class="history-row">
+                <td colspan="5">
+                  <HistoryPanel :events="historyFor[k.id] || []" />
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
 
@@ -290,6 +306,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { api } from '../api'
+import HistoryPanel from '../components/HistoryPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -326,6 +343,10 @@ const assignChoice = ref('')
 const approveComment = ref('')
 const rejectComment = ref('')
 
+const historyFor      = reactive({})
+const historyCounts   = reactive({})
+const openHistories   = reactive({})
+
 const myProjectRole = computed(() => {
   const me = members.value.find(m => m.user_id === auth.user?.id)
   return me?.role || null
@@ -361,6 +382,24 @@ function errMsg(e) {
     return t(`workflow.errors.${code}`)
   }
   return e.message
+}
+
+async function toggleHistory(keyId) {
+  if (openHistories[keyId]) {
+    openHistories[keyId] = false
+    return
+  }
+  if (!historyFor[keyId]) {
+    try {
+      const data = await api.get(`/api/v1/keys/${keyId}/history`)
+      historyFor[keyId] = data.events || []
+      historyCounts[keyId] = (data.events || []).length
+    } catch (_) {
+      historyFor[keyId] = []
+      historyCounts[keyId] = 0
+    }
+  }
+  openHistories[keyId] = true
 }
 
 async function loadEngines() {
@@ -488,6 +527,7 @@ async function save(k) {
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
     draft[k.id].savedAt = Date.now()
+    delete historyFor[k.id]
     await loadStats()
     await refreshFile()
   } catch (e) { error.value = errMsg(e) }
@@ -505,6 +545,7 @@ async function aiOne(k) {
     draft[k.id].text = data.translation.text || ''
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
+    delete historyFor[k.id]
     await loadStats()
     await refreshFile()
   } catch (e) { error.value = errMsg(e) }
@@ -520,6 +561,7 @@ async function translateFile() {
       engine: 'libretranslate',
     })
     lastBulk.value = data
+    for (const k of Object.keys(historyFor)) delete historyFor[k]
     await reload(1)
     await loadStats()
     await refreshFile()
