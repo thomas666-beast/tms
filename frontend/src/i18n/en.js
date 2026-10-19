@@ -98,6 +98,7 @@ export default {
     },
   },
   files: {
+    overwrite: 'Overwrite existing files if names match',
     empty: 'No files yet.',
     upload: '+ Upload file',
     unassigned: 'Unassigned',

@@ -1238,3 +1238,15 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .stat-label { font-size: 14px; color: var(--muted); }
 .stat-value { font-weight: 600; color: var(--text); }
 .success-text { color: var(--success); margin-top: 8px; }
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-top: 8px;
+}
+.checkbox-label input {
+  width: auto;
+  margin: 0;
+}

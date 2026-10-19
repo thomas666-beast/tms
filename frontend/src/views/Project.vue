@@ -131,6 +131,7 @@
         </div>
       </div>
 
+      <!-- Upload Form -->
       <div v-if="uploadingFile" class="form-box">
         <h3>{{ t('files.uploadTitle') }}</h3>
         <div class="form-grid">
@@ -156,14 +157,22 @@
           </label>
           <label>
             {{ t('files.uploadName') }}
-            <input v-model="uploadDraft.name" placeholder="auth.php" />
+            <input v-model="uploadDraft.name" placeholder="(leave empty to use filename)" />
           </label>
           <label>
-            File
-            <input ref="fileInput" type="file" />
+            Files
+            <input ref="fileInput" type="file" multiple />
           </label>
         </div>
-        <div class="row-actions">
+        
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="uploadDraft.overwrite" />
+          {{ t('files.overwrite') }}
+        </label>
+        
+        <p v-if="uploadStatus" class="muted" style="margin-top: 8px;">{{ uploadStatus }}</p>
+
+        <div class="row-actions" style="margin-top: 16px;">
           <button
             @click="submitUpload"
             :disabled="!uploadDraft.format || !uploadDraft.target || !fileInput?.files?.length || uploading"
@@ -251,6 +260,7 @@ const loading = ref(true)
 const error = ref('')
 const uploading = ref(false)
 const busy = ref(false)
+const uploadStatus = ref('')
 
 const editing = ref(false)
 const editDraft = reactive({ name: '', default_source_lang: '' })
@@ -260,7 +270,7 @@ const newMember = reactive({ user_id: '', role: 'translator' })
 
 const uploadingFile = ref(false)
 const fileInput = ref(null)
-const uploadDraft = reactive({ format: '', target: '', name: '' })
+const uploadDraft = reactive({ format: '', target: '', name: '', overwrite: false })
 const fileFilter = ref('all')
 
 const isGlobalAdmin = computed(() => auth.user?.role === 'admin')
@@ -375,41 +385,65 @@ async function startUpload() {
   uploadingFile.value = true
   uploadDraft.target = uploadDraft.target || ''
   uploadDraft.name = ''
+  uploadDraft.overwrite = false
 }
 
 function cancelUpload() {
   uploadingFile.value = false
   uploadDraft.name = ''
+  uploadDraft.overwrite = false
+  uploadStatus.value = ''
   if (fileInput.value) fileInput.value.value = ''
 }
 
 async function submitUpload() {
-  const file = fileInput.value?.files?.[0]
-  if (!file) return
+  const selectedFiles = fileInput.value?.files
+  if (!selectedFiles || selectedFiles.length === 0) return
+  
   uploading.value = true
   error.value = ''
-  try {
-    const fd = new FormData()
-    fd.append('file', file)
-    fd.append('format', uploadDraft.format)
-    fd.append('source_lang', project.value.default_source_lang)
-    fd.append('target_lang', uploadDraft.target)
-    fd.append('name', uploadDraft.name || file.name)
+  let successCount = 0
+  let failCount = 0
 
-    const res = await fetch(`/api/v1/projects/${route.params.id}/files`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'X-CSRF-Token': auth.csrf_token },
-      body: fd,
-    })
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}))
-      throw new Error(j.error || `HTTP ${res.status}`)
+  for (let i = 0; i < selectedFiles.length; i++) {
+    uploadStatus.value = `Uploading ${i + 1} / ${selectedFiles.length}...`
+    const file = selectedFiles[i]
+    
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('format', uploadDraft.format)
+      fd.append('source_lang', project.value.default_source_lang)
+      fd.append('target_lang', uploadDraft.target)
+      fd.append('name', uploadDraft.name || file.name)
+      if (uploadDraft.overwrite) fd.append('overwrite', '1')
+
+      const res = await fetch(`/api/v1/projects/${route.params.id}/files`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'X-CSRF-Token': auth.csrf_token },
+        body: fd,
+      })
+      
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
+      successCount++
+    } catch (e) {
+      console.error(`Failed to upload ${file.name}:`, e)
+      failCount++
     }
-    cancelUpload()
-    await load()
-  } catch (e) { error.value = e.message }
-  finally { uploading.value = false }
+  }
+
+  uploadStatus.value = ''
+  uploading.value = false
+  cancelUpload()
+  
+  if (failCount > 0) {
+    error.value = `Uploaded ${successCount} files. ${failCount} failed.`
+  }
+  await load()
 }
 
 function formatNum(n) { return (n ?? 0).toLocaleString() }
