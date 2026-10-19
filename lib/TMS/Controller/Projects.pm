@@ -14,6 +14,17 @@ sub list ($c) {
                (SELECT count(*) FROM project_members m WHERE m.project_id = p.id) AS members_count,
                (SELECT count(*) FROM files f WHERE f.project_id = p.id) AS files_total,
                (SELECT count(*) FROM files f WHERE f.project_id = p.id AND f.status = 'approved') AS files_approved,
+               (SELECT count(DISTINCT f.id)
+                  FROM files f
+                  JOIN keys k ON k.file_id = f.id
+                 WHERE f.project_id = p.id
+                   AND (SELECT count(DISTINCT t.translated_by_user_id)
+                          FROM translations t
+                         WHERE t.key_id = k.id
+                           AND t.revision_id = f.current_revision_id
+                           AND t.language    = f.target_lang
+                           AND t.action = 'correct'
+                           AND t.translated_by_ai = false) >= 2) AS files_contested,
                (SELECT COALESCE(sum(k.word_count), 0)
                   FROM files f JOIN keys k ON k.file_id = f.id
                  WHERE f.project_id = p.id) AS words_total
@@ -38,6 +49,17 @@ sub list ($c) {
                (SELECT count(*) FROM project_members m2 WHERE m2.project_id = p.id) AS members_count,
                (SELECT count(*) FROM files f WHERE f.project_id = p.id) AS files_total,
                (SELECT count(*) FROM files f WHERE f.project_id = p.id AND f.status = 'approved') AS files_approved,
+               (SELECT count(DISTINCT f.id)
+                  FROM files f
+                  JOIN keys k ON k.file_id = f.id
+                 WHERE f.project_id = p.id
+                   AND (SELECT count(DISTINCT t.translated_by_user_id)
+                          FROM translations t
+                         WHERE t.key_id = k.id
+                           AND t.revision_id = f.current_revision_id
+                           AND t.language    = f.target_lang
+                           AND t.action = 'correct'
+                           AND t.translated_by_ai = false) >= 2) AS files_contested,
                (SELECT COALESCE(sum(k.word_count), 0)
                   FROM files f JOIN keys k ON k.file_id = f.id
                  WHERE f.project_id = p.id) AS words_total
@@ -105,6 +127,17 @@ sub show ($c) {
              p.created_at, p.updated_at,
              (SELECT count(*) FROM files f WHERE f.project_id = p.id) AS files_total,
              (SELECT count(*) FROM files f WHERE f.project_id = p.id AND f.status = 'approved') AS files_approved,
+             (SELECT count(DISTINCT f.id)
+                FROM files f
+                JOIN keys k ON k.file_id = f.id
+               WHERE f.project_id = p.id
+                 AND (SELECT count(DISTINCT t.translated_by_user_id)
+                        FROM translations t
+                       WHERE t.key_id = k.id
+                         AND t.revision_id = f.current_revision_id
+                         AND t.language    = f.target_lang
+                         AND t.action = 'correct'
+                         AND t.translated_by_ai = false) >= 2) AS files_contested,
              (SELECT COALESCE(sum(k.word_count), 0)
                 FROM files f JOIN keys k ON k.file_id = f.id
                WHERE f.project_id = p.id) AS words_total
@@ -119,16 +152,25 @@ sub show ($c) {
   my $members = $c->db->query(
     q{
       SELECT m.user_id, m.role, u.email, u.name,
-             (SELECT COALESCE(sum(k.word_count), 0)
-                FROM files f
-                JOIN keys k ON k.file_id = f.id
-                JOIN LATERAL (
-                  SELECT translated_by_user_id FROM translations
-                   WHERE key_id = k.id AND language = f.target_lang
-                   ORDER BY created_at DESC LIMIT 1
-                ) t ON true
-               WHERE f.project_id = m.project_id
-                 AND t.translated_by_user_id = m.user_id) AS words_translated
+             COALESCE((
+               SELECT sum(t.word_count)
+                 FROM translations t
+                 JOIN keys k ON k.id = t.key_id
+                 JOIN files f ON f.id = k.file_id
+                WHERE f.project_id = m.project_id
+                  AND t.translated_by_user_id = m.user_id
+                  AND t.action = 'translate'
+                  AND t.translated_by_ai = false
+             ), 0) AS words_translated,
+             COALESCE((
+               SELECT sum(t.word_count)
+                 FROM translations t
+                 JOIN keys k ON k.id = t.key_id
+                 JOIN files f ON f.id = k.file_id
+                WHERE f.project_id = m.project_id
+                  AND t.translated_by_user_id = m.user_id
+                  AND t.action = 'correct'
+             ), 0) AS words_corrected
         FROM project_members m
         JOIN users u ON u.id = m.user_id
        WHERE m.project_id = ?
@@ -216,6 +258,7 @@ sub _public_project ($p) {
     files_total         => $total,
     files_approved      => $approved,
     files_not_approved  => $total - $approved,
+    files_contested     => defined $p->{files_contested} ? 0 + $p->{files_contested} : 0,
     approved            => ($total > 0 && $approved == $total) ? 1 : 0,
     words_total         => defined $p->{words_total} ? 0 + $p->{words_total} : 0,
   );
@@ -231,6 +274,7 @@ sub _public_member ($m) {
     name             => $m->{name},
     role             => $m->{role},
     words_translated => defined $m->{words_translated} ? 0 + $m->{words_translated} : 0,
+    words_corrected  => defined $m->{words_corrected} ? 0 + $m->{words_corrected} : 0,
   };
 }
 
