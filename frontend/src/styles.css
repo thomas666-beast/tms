@@ -1200,3 +1200,26 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
   font-size: 11px;
   margin-top: 2px;
 }
+
+.project-progress {
+  margin-top: 16px;
+  max-width: 600px;
+}
+.progress-bar-bg {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--success);
+  transition: width 0.3s ease;
+}
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}

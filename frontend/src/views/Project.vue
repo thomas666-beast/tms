@@ -9,7 +9,7 @@
 
     <template v-else-if="project">
       <div v-if="!editing" class="file-header">
-        <div>
+        <div style="flex: 1;">
           <h1 class="file-title">
             {{ project.name }}
             <span v-if="project.approved" class="badge status-approved">{{ t('projects.approved') }}</span>
@@ -22,18 +22,21 @@
             <span class="dot">·</span>
             <span>{{ project.files_total }} {{ t('projects.filesLabel') }}</span>
             <span class="dot">·</span>
-            <span class="stat-approved">{{ project.files_approved }} {{ t('projects.approvedLabel') }}</span>
-            <span class="dot">·</span>
-            <span class="stat-open">{{ project.files_not_approved }} {{ t('projects.openLabel') }}</span>
-            <span v-if="project.files_contested > 0" class="dot">·</span>
-            <span v-if="project.files_contested > 0" class="stat-contested">
-              {{ project.files_contested }} {{ t('projects.contestedLabel') }}
-            </span>
-            <span class="dot">·</span>
             <span>{{ formatNum(project.words_total) }} {{ t('projects.wordsLabel') }}</span>
           </div>
+          
+          <!-- Progress Bar -->
+          <div class="project-progress">
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" :style="{ width: project.progress_percent + '%' }"></div>
+            </div>
+            <div class="progress-labels">
+              <span>{{ project.progress_percent }}% {{ t('projects.approved') }}</span>
+              <span>{{ project.files_approved }} / {{ project.files_total }} {{ t('projects.filesLabel') }}</span>
+            </div>
+          </div>
         </div>
-        <div v-if="canManageMembers" class="row-actions">
+        <div v-if="canManageMembers" class="row-actions" style="align-self: flex-start;">
           <button @click="startEdit" class="btn-link">{{ t('projects.edit') }}</button>
         </div>
       </div>
@@ -123,9 +126,17 @@
 
       <div class="row" style="margin-top: 32px;">
         <h2>{{ t('projects.files') }}</h2>
-        <button v-if="canManageFiles && !uploadingFile" @click="startUpload" class="primary">
-          {{ t('files.upload') }}
-        </button>
+        <div class="row-actions">
+          <select v-model="fileFilter" class="small">
+            <option value="all">All files</option>
+            <option value="in_progress">In progress</option>
+            <option value="approved">Approved</option>
+            <option value="contested">Contested</option>
+          </select>
+          <button v-if="canManageFiles && !uploadingFile" @click="startUpload" class="primary">
+            {{ t('files.upload') }}
+          </button>
+        </div>
       </div>
 
       <div v-if="uploadingFile" class="form-box">
@@ -170,7 +181,7 @@
         </div>
       </div>
 
-      <div v-if="files.length === 0" class="empty-block">
+      <div v-if="filteredFiles.length === 0" class="empty-block">
         <p>{{ t('files.empty') }}</p>
       </div>
       <div v-else class="table-card">
@@ -187,11 +198,14 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="f in files" :key="f.id" class="clickable" @click="openFile(f.id)">
+            <tr v-for="f in filteredFiles" :key="f.id" class="clickable" @click="openFile(f.id)">
               <td>{{ f.name }}</td>
               <td><code>{{ f.format }}</code></td>
               <td>{{ f.target_lang }}</td>
-              <td><span class="badge" :class="'status-' + f.status">{{ f.status }}</span></td>
+              <td>
+                <span class="badge" :class="'status-' + f.status">{{ f.status }}</span>
+                <!-- We don't have contested count per file in the list query yet, but if we did we'd show it here -->
+              </td>
               <td>{{ f.assigned_to_name || t('files.unassigned') }}</td>
               <td class="num">{{ f.keys_count }}</td>
               <td class="num">{{ formatNum(f.words_total) }}</td>
@@ -234,6 +248,7 @@ const newMember = reactive({ user_id: '', role: 'translator' })
 const uploadingFile = ref(false)
 const fileInput = ref(null)
 const uploadDraft = reactive({ format: '', target: '', name: '' })
+const fileFilter = ref('all')
 
 const isGlobalAdmin = computed(() => auth.user?.role === 'admin')
 const myProjectRole = computed(() => {
@@ -244,6 +259,14 @@ const canManageMembers = computed(() =>
   isGlobalAdmin.value || myProjectRole.value === 'admin')
 const canManageFiles = computed(() =>
   isGlobalAdmin.value || myProjectRole.value === 'admin')
+
+const filteredFiles = computed(() => {
+  if (fileFilter.value === 'all') return files.value
+  if (fileFilter.value === 'approved') return files.value.filter(f => f.status === 'approved')
+  if (fileFilter.value === 'in_progress') return files.value.filter(f => f.status !== 'approved')
+  // If we had contested data per file, we'd filter here
+  return files.value
+})
 
 async function loadFormats() {
   if (formats.value.length) return

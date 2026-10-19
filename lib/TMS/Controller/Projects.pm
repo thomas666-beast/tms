@@ -308,4 +308,74 @@ sub _audit ($c, $action, $entity_id, $old, $new) {
   );
 }
 
+sub memory ($c) {
+  my $project_id = $c->param('id');
+  my $q = $c->param('q') // '';
+  
+  $q =~ s/^\s+|\s+$//g; # trim
+  return _err($c, 400, 'query_required') unless length $q;
+  return _err($c, 400, 'query_too_short') if length $q < 3;
+  
+  return undef unless $c->can_access_project($project_id);
+
+  my $rows = $c->db->query(
+    q{
+      SELECT k.source_text,
+             k.key_path,
+             f.name AS file_name,
+             t.text AS translation_text,
+             f.target_lang
+        FROM keys k
+        JOIN files f ON f.id = k.file_id
+        JOIN LATERAL (
+          SELECT text FROM translations
+           WHERE key_id = k.id AND language = f.target_lang
+             AND action IN ('translate', 'correct')
+           ORDER BY created_at DESC LIMIT 1
+        ) t ON true
+       WHERE f.project_id = ?
+         AND k.source_text ILIKE ?
+       LIMIT 15
+    },
+    $project_id, "%$q%",
+  )->hashes;
+
+  $c->render(json => {
+    results => [ map {
+      {
+        source_text      => $_->{source_text},
+        translation_text => $_->{translation_text},
+        target_lang      => $_->{target_lang},
+        file_name        => $_->{file_name},
+        key_path         => $_->{key_path},
+      }
+    } @$rows ],
+  });
+}
+
+sub _public_project ($p) {
+  my $total    = defined $p->{files_total}    ? 0 + $p->{files_total}    : 0;
+  my $approved = defined $p->{files_approved} ? 0 + $p->{files_approved} : 0;
+  my $percent  = $total > 0 ? int(($approved / $total) * 100) : 0;
+
+  my %out = (
+    id                  => 0 + $p->{id},
+    name                => $p->{name},
+    slug                => $p->{slug},
+    default_source_lang => $p->{default_source_lang},
+    created_at          => $p->{created_at},
+    updated_at          => $p->{updated_at},
+    files_total         => $total,
+    files_approved      => $approved,
+    files_not_approved  => $total - $approved,
+    files_contested     => defined $p->{files_contested} ? 0 + $p->{files_contested} : 0,
+    approved            => ($total > 0 && $approved == $total) ? 1 : 0,
+    progress_percent    => $percent,
+    words_total         => defined $p->{words_total} ? 0 + $p->{words_total} : 0,
+  );
+  $out{member_role}   = $p->{member_role}   if defined $p->{member_role};
+  $out{members_count} = 0 + $p->{members_count} if defined $p->{members_count};
+  return \%out;
+}
+
 1;
