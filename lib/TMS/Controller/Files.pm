@@ -858,4 +858,67 @@ sub _audit ($c, $action, $file_id, $new) {
   );
 }
 
+sub preview ($c) {
+  my $file_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
+
+  my $file = $c->db->query(
+    q{
+      SELECT id, project_id, name, format, source_lang, target_lang, current_revision_id
+        FROM files WHERE id = ?
+    },
+    $file_id,
+  )->hash;
+  return _err($c, 404, 'file_not_found') unless $file;
+  return undef unless $c->can_access_project($file->{project_id});
+
+  my $revision_id = $file->{current_revision_id};
+
+  my $adapter = eval { TMS::Adapter->for($file->{format}) };
+  return _err($c, 500, 'adapter_failed') unless $adapter;
+
+  my $keys = $c->db->query(
+    q{
+      SELECT k.key_path, k.source_text,
+             t.text   AS translation_text,
+             t.status AS translation_status
+        FROM keys k
+        LEFT JOIN LATERAL (
+          SELECT text, status FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC LIMIT 1
+        ) t ON true
+       WHERE k.file_id = ?
+       ORDER BY k.key_path
+    },
+    $revision_id, $file->{target_lang}, $file->{id},
+  )->hashes;
+
+  my %flat;
+  for my $k (@$keys) {
+    my $use = $k->{source_text} // '';
+    if (defined $k->{translation_text}
+        && $k->{translation_status}
+        && $k->{translation_status} =~ /\A(?:translated|approved)\z/) {
+      $use = $k->{translation_text};
+    }
+    $flat{ $k->{key_path} } = $use;
+  }
+
+  my $body;
+  eval { $body = $adapter->serialize(\%flat); 1 }
+    or do {
+      my $err = $@ || 'serialize failed';
+      chomp $err;
+      return _err($c, 500, 'serialize_failed', { detail => $err });
+    };
+
+  my $ext = $adapter->extension;
+  my $name = $file->{name};
+  $name =~ s/\.[^.]+\z//;
+  $name = $name . '.' . $ext;
+
+  $c->render(json => { content => $body, filename => $name });
+}
+
 1;

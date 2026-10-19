@@ -2,6 +2,7 @@ package TMS::Controller::Translations;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::JSON;
+use TMS::Util::Validator;
 
 sub edit ($c) {
   my $key_id = $c->param('id');
@@ -50,6 +51,7 @@ sub edit ($c) {
   my $text   = exists $body->{text}   ? $body->{text}   : undef;
   my $status = exists $body->{status} ? $body->{status} : undef;
   my $note   = exists $body->{note}   ? $body->{note}   : undef;
+  my $force  = $body->{force} // 0;
   my $client_lock = $body->{lock_version};
 
   return _err($c, 400, 'nothing_to_update')
@@ -92,6 +94,17 @@ sub edit ($c) {
 
   if ($final_status eq 'translated' && (!defined $final_text || !length $final_text)) {
     return _err($c, 400, 'text_required');
+  }
+
+  # Tag validation
+  if (!$force && defined $final_text) {
+    my $missing = TMS::Util::Validator::missing_tags($key->{source_text}, $final_text);
+    if (@$missing) {
+      return $c->render(json => { 
+        error => 'missing_tags', 
+        tags => $missing 
+      }, status => 422);
+    }
   }
 
   my $action = _classify(
@@ -168,6 +181,7 @@ sub edit ($c) {
     return _err($c, 500, 'save_failed');
   };
 }
+
 sub history ($c) {
   my $key_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $key_id =~ /\A\d+\z/;
@@ -211,7 +225,6 @@ sub history ($c) {
   });
 }
 
-# ------------------------------------------------------------
 sub _err ($c, $status, $code) {
   $c->render(json => { error => $code }, status => $status);
   return undef;
