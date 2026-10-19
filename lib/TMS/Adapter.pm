@@ -4,6 +4,7 @@ use Mojo::Base -base, -signatures;
 my %ADAPTERS = (
   laravel => 'TMS::Adapter::Laravel',
   vue     => 'TMS::Adapter::VueI18n',
+  vue_js  => 'TMS::Adapter::VueI18nJs',
 );
 
 sub for ($class, $name) {

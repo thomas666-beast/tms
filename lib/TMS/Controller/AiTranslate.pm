@@ -2,9 +2,12 @@ package TMS::Controller::AiTranslate;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::JSON;
-use TMS::Engine;
 
 my $PLACEHOLDER_RE = qr/(?::[A-Za-z_][A-Za-z0-9_]*|\{\{?\s*[A-Za-z0-9_.]+\s*\}?\}|%(?:\d+\$)?[sd])/;
+
+sub engines ($c) {
+  $c->render(json => { engines => $c->ai_engines });
+}
 
 sub key ($c) {
   my $key_id = $c->param('id');
@@ -12,7 +15,7 @@ sub key ($c) {
 
   my $key = $c->db->query(
     q{
-      SELECT k.id, k.key_path, k.source_text,
+      SELECT k.id, k.key_path, k.source_text, k.word_count,
              f.id AS file_id, f.project_id, f.target_lang, f.source_lang,
              f.status AS file_status, f.assigned_to_user_id,
              f.current_revision_id
@@ -48,7 +51,7 @@ sub key ($c) {
   my $body        = $c->req->json || {};
   my $engine_name = $body->{engine} // 'libretranslate';
 
-  my $engine = eval { TMS::Engine->for($engine_name) };
+  my $engine = eval { $c->ai_engine($engine_name) };
   return _err($c, 400, 'unsupported_engine') unless $engine;
 
   my $source_text = $key->{source_text} // '';
@@ -70,22 +73,20 @@ sub key ($c) {
     push @missing, $ph unless index($translated, $ph) >= 0;
   }
   $status = 'needs_review' if @missing;
-
-  my $note;
-  if (@missing) {
-    $note = 'Placeholders missing: ' . join(', ', @missing);
-  }
+  my $note = @missing ? 'Placeholders missing: ' . join(', ', @missing) : undef;
 
   my $row = $c->db->query(
     q{
       INSERT INTO translations
         (key_id, revision_id, language, text, status, note,
-         translated_by_user_id, translated_by_ai, ai_engine)
-      VALUES (?, ?, ?, ?, ?, ?, ?, true, ?)
-      RETURNING id, text, status, note, created_at
+         translated_by_user_id, translated_by_ai, ai_engine,
+         word_count, action)
+      VALUES (?, ?, ?, ?, ?, ?, ?, true, ?, ?, 'ai_draft')
+      RETURNING id, text, status, note, created_at, word_count, action
     },
     $key->{id}, $key->{current_revision_id}, $key->{target_lang},
     $translated, $status, $note, $me->{id}, $engine->name,
+    $key->{word_count} // 0,
   )->hash;
 
   _audit($c, 'translation.ai', $key->{id}, {
@@ -104,6 +105,8 @@ sub key ($c) {
       translated_by_user_id => 0 + $me->{id},
       translated_by_ai      => 1,
       ai_engine             => $engine->name,
+      word_count            => 0 + $row->{word_count},
+      action                => $row->{action},
       created_at            => $row->{created_at},
     },
   });
@@ -143,22 +146,18 @@ sub file ($c) {
   my $body        = $c->req->json || {};
   my $engine_name = $body->{engine} // 'libretranslate';
 
-  my $engine = eval { TMS::Engine->for($engine_name) };
+  my $engine = eval { $c->ai_engine($engine_name) };
   return _err($c, 400, 'unsupported_engine') unless $engine;
 
   my $keys = $c->db->query(
     q{
-      SELECT k.id, k.key_path, k.source_text,
+      SELECT k.id, k.key_path, k.source_text, k.word_count,
              t.id AS translation_id
         FROM keys k
         LEFT JOIN LATERAL (
-          SELECT id
-            FROM translations
-           WHERE key_id = k.id
-             AND revision_id = ?
-             AND language = ?
-           ORDER BY created_at DESC
-           LIMIT 1
+          SELECT id FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC LIMIT 1
         ) t ON true
        WHERE k.file_id = ?
        ORDER BY k.key_path
@@ -169,9 +168,9 @@ sub file ($c) {
   my @todo = grep { !defined $_->{translation_id} && length($_->{source_text} // '') } @$keys;
 
   my @results;
-  my $translated_count = 0;
+  my $translated_count   = 0;
   my $needs_review_count = 0;
-  my $error_count = 0;
+  my $error_count        = 0;
 
   for my $k (@todo) {
     my $translated = eval {
@@ -192,49 +191,47 @@ sub file ($c) {
       push @missing, $ph unless index($translated, $ph) >= 0;
     }
     $status = 'needs_review' if @missing;
-
-    my $note;
-    if (@missing) {
-      $note = 'Placeholders missing: ' . join(', ', @missing);
-    }
+    my $note = @missing ? 'Placeholders missing: ' . join(', ', @missing) : undef;
 
     my $row = $c->db->query(
       q{
         INSERT INTO translations
           (key_id, revision_id, language, text, status, note,
-           translated_by_user_id, translated_by_ai, ai_engine)
-        VALUES (?, ?, ?, ?, ?, ?, ?, true, ?)
+           translated_by_user_id, translated_by_ai, ai_engine,
+           word_count, action)
+        VALUES (?, ?, ?, ?, ?, ?, ?, true, ?, ?, 'ai_draft')
         RETURNING id
       },
       $k->{id}, $file->{current_revision_id}, $file->{target_lang},
       $translated, $status, $note, $me->{id}, $engine->name,
+      $k->{word_count} // 0,
     )->hash;
 
     push @results, {
-      key_id       => 0 + $k->{id},
+      key_id         => 0 + $k->{id},
       translation_id => 0 + $row->{id},
-      status       => $status,
-      ok           => 1,
+      status         => $status,
+      ok             => 1,
     };
     $translated_count++;
     $needs_review_count++ if $status eq 'needs_review';
   }
 
   _audit($c, 'file.ai_translate', $file->{id}, {
-    engine         => $engine->name,
-    translated     => $translated_count,
-    needs_review   => $needs_review_count,
-    errors         => $error_count,
+    engine       => $engine->name,
+    translated   => $translated_count,
+    needs_review => $needs_review_count,
+    errors       => $error_count,
   });
 
   $c->render(json => {
-    ok             => 1,
-    engine         => $engine->name,
-    translated     => $translated_count,
-    needs_review   => $needs_review_count,
-    errors         => $error_count,
-    total          => scalar(@todo),
-    results        => \@results,
+    ok           => 1,
+    engine       => $engine->name,
+    translated   => $translated_count,
+    needs_review => $needs_review_count,
+    errors       => $error_count,
+    total        => scalar(@todo),
+    results      => \@results,
   });
 }
 

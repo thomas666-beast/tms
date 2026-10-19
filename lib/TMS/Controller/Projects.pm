@@ -11,7 +11,12 @@ sub list ($c) {
       q{
         SELECT p.id, p.name, p.slug, p.default_source_lang,
                p.created_at, p.updated_at,
-               (SELECT count(*) FROM project_members m WHERE m.project_id = p.id) AS members_count
+               (SELECT count(*) FROM project_members m WHERE m.project_id = p.id) AS members_count,
+               (SELECT count(*) FROM files f WHERE f.project_id = p.id) AS files_total,
+               (SELECT count(*) FROM files f WHERE f.project_id = p.id AND f.status = 'approved') AS files_approved,
+               (SELECT COALESCE(sum(k.word_count), 0)
+                  FROM files f JOIN keys k ON k.file_id = f.id
+                 WHERE f.project_id = p.id) AS words_total
           FROM projects p
          ORDER BY p.created_at DESC, p.id DESC
       },
@@ -30,7 +35,12 @@ sub list ($c) {
       q{
         SELECT p.id, p.name, p.slug, p.default_source_lang,
                p.created_at, p.updated_at, m.role AS member_role,
-               (SELECT count(*) FROM project_members m2 WHERE m2.project_id = p.id) AS members_count
+               (SELECT count(*) FROM project_members m2 WHERE m2.project_id = p.id) AS members_count,
+               (SELECT count(*) FROM files f WHERE f.project_id = p.id) AS files_total,
+               (SELECT count(*) FROM files f WHERE f.project_id = p.id AND f.status = 'approved') AS files_approved,
+               (SELECT COALESCE(sum(k.word_count), 0)
+                  FROM files f JOIN keys k ON k.file_id = f.id
+                 WHERE f.project_id = p.id) AS words_total
           FROM projects p
           JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
          WHERE 1 = 1
@@ -91,9 +101,15 @@ sub show ($c) {
 
   my $project = $c->db->query(
     q{
-      SELECT id, name, slug, default_source_lang, created_at, updated_at
-        FROM projects
-       WHERE id = ?
+      SELECT p.id, p.name, p.slug, p.default_source_lang,
+             p.created_at, p.updated_at,
+             (SELECT count(*) FROM files f WHERE f.project_id = p.id) AS files_total,
+             (SELECT count(*) FROM files f WHERE f.project_id = p.id AND f.status = 'approved') AS files_approved,
+             (SELECT COALESCE(sum(k.word_count), 0)
+                FROM files f JOIN keys k ON k.file_id = f.id
+               WHERE f.project_id = p.id) AS words_total
+        FROM projects p
+       WHERE p.id = ?
     },
     $id,
   )->hash;
@@ -102,7 +118,17 @@ sub show ($c) {
 
   my $members = $c->db->query(
     q{
-      SELECT m.user_id, m.role, u.email, u.name
+      SELECT m.user_id, m.role, u.email, u.name,
+             (SELECT COALESCE(sum(k.word_count), 0)
+                FROM files f
+                JOIN keys k ON k.file_id = f.id
+                JOIN LATERAL (
+                  SELECT translated_by_user_id FROM translations
+                   WHERE key_id = k.id AND language = f.target_lang
+                   ORDER BY created_at DESC LIMIT 1
+                ) t ON true
+               WHERE f.project_id = m.project_id
+                 AND t.translated_by_user_id = m.user_id) AS words_translated
         FROM project_members m
         JOIN users u ON u.id = m.user_id
        WHERE m.project_id = ?
@@ -177,6 +203,9 @@ sub _err ($c, $status, $code) {
 }
 
 sub _public_project ($p) {
+  my $total    = defined $p->{files_total}    ? 0 + $p->{files_total}    : 0;
+  my $approved = defined $p->{files_approved} ? 0 + $p->{files_approved} : 0;
+
   my %out = (
     id                  => 0 + $p->{id},
     name                => $p->{name},
@@ -184,6 +213,11 @@ sub _public_project ($p) {
     default_source_lang => $p->{default_source_lang},
     created_at          => $p->{created_at},
     updated_at          => $p->{updated_at},
+    files_total         => $total,
+    files_approved      => $approved,
+    files_not_approved  => $total - $approved,
+    approved            => ($total > 0 && $approved == $total) ? 1 : 0,
+    words_total         => defined $p->{words_total} ? 0 + $p->{words_total} : 0,
   );
   $out{member_role}   = $p->{member_role}   if defined $p->{member_role};
   $out{members_count} = 0 + $p->{members_count} if defined $p->{members_count};
@@ -192,10 +226,11 @@ sub _public_project ($p) {
 
 sub _public_member ($m) {
   return {
-    user_id => 0 + $m->{user_id},
-    email   => $m->{email},
-    name    => $m->{name},
-    role    => $m->{role},
+    user_id          => 0 + $m->{user_id},
+    email            => $m->{email},
+    name             => $m->{name},
+    role             => $m->{role},
+    words_translated => defined $m->{words_translated} ? 0 + $m->{words_translated} : 0,
   };
 }
 

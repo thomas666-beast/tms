@@ -956,3 +956,89 @@ tr.inactive td { color: var(--muted); }
   color: #4338ca;
   font-size: 14px;
 }
+
+/* ============================================================
+   Translate-file busy state
+   ============================================================ */
+.translate-file-btn {
+  font-weight: 600;
+}
+.translate-banner {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin: 8px 0 16px 0;
+  font-size: 13px;
+}
+.editor-table-wrap.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* ============================================================
+   Project card colors + counters
+   ============================================================ */
+.project-card-approved {
+  border-left: 4px solid var(--success);
+}
+.project-card-open {
+  border-left: 4px solid var(--border-2);
+}
+
+.project-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 12px 0 8px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.project-card-stats strong { color: var(--text); font-weight: 600; }
+.project-card-stats .stat-approved strong { color: var(--success); }
+.project-card-stats .stat-open strong     { color: var(--warning); }
+
+.stat-approved { color: var(--success); }
+.stat-open     { color: var(--warning); }
+
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.badge.status-in_review { background: #e0e7ff; color: #3730a3; }
+.badge.status-in_progress,
+.badge.status-assigned,
+.badge.status-unassigned { background: #f3f4f6; color: var(--muted); }
+.badge.status-locked { background: #e5e7eb; color: #374151; }
+
+.file-stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.file-stats strong { color: var(--text); font-weight: 600; }
+.file-stats .stat-translated strong { color: var(--accent); }
+.file-stats .stat-approved strong   { color: var(--success); }
+
+.stats-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 12px 0 20px 0;
+  box-shadow: var(--shadow);
+}
+.stats-panel h3 { margin: 0 0 10px 0; font-size: 14px; }
+.stats-panel .table { box-shadow: none; }
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: #f9fafb;
+}

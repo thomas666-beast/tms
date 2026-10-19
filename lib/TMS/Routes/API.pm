@@ -61,7 +61,7 @@ sub register ($self, $app, $conf) {
   $authed->post ('/projects/:id/files')            ->to('Files#upload');
   $authed->get  ('/projects/:id/files')            ->to('Files#list_by_project');
   $authed->get  ('/files/:id')                     ->to('Files#show');
-  $authed->get  ('/files/:id/keys')                ->to('Files#keys');
+  # $authed->get  ('/files/:id/keys')                ->to('Files#keys');
 
   $authed->get  ('/ai/engines')                     ->to('AiTranslate#engines');
 
@@ -85,6 +85,11 @@ sub register ($self, $app, $conf) {
 
   $authed->get ('/formats')                          ->to('Formats#list');
 
+  $authed->get ('/files/:id/member_stats')          ->to('Files#member_stats');
+
+  $authed->get   ('/files/:id/keys')                ->to('Files#list_keys');
+  $authed->get   ('/files/:id/member_stats')        ->to('Files#member_stats');
+
   my $admin = $api->under(sub ($c) {
     return $c->require_role('admin');
   });
@@ -94,6 +99,8 @@ sub register ($self, $app, $conf) {
   $admin->post ('/users')             ->to('Users#create');
   $admin->patch('/users/:id')         ->to('Users#update');
   $admin->post ('/users/:id/password')->to('Users#set_password');
+
+  $authed->get ('/keys/:id/history')                ->to('Translations#history');
 }
 
 1;

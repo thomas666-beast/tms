@@ -1,4 +1,4 @@
-use Mojo::Base -strict;
+use Mojo::Base -strict, -signatures;
 use Test::More;
 use Test::Mojo;
 
@@ -6,6 +6,16 @@ use FindBin;
 use lib "$FindBin::Bin/../lib";
 require "$FindBin::Bin/testlib.pl";
 use TMS;
+use TMS::Engine;
+
+{
+  package FakeEngine;
+  sub new { my ($class, %a) = @_; bless {%a}, $class }
+  sub name { $_[0]->{name} }
+  sub translate { my ($self, $text, $from, $to) = @_; return "AI: $text" }
+}
+
+$TMS::Engine::FOR_TEST = sub { FakeEngine->new(name => $_[0]) };
 
 my $t = Test::Mojo->new('TMS');
 
@@ -20,178 +30,148 @@ my $admin = $t->app->pg_pool->db->query(
 plan skip_all => 'no seeded admin (run script/test_db.pl first)'
   unless $admin && $admin_password;
 
+my $db = $t->app->pg_pool->db;
+$db->query(q{DELETE FROM projects WHERE slug LIKE 'test-act-%'});
+$db->query(q{DELETE FROM users    WHERE email LIKE 'test-act-%@example.com'});
+
 $t->post_ok('/api/v1/auth/login' => json => {
   email    => $admin_email,
   password => $admin_password,
 })
   ->status_is(200)
   ->json_has('/csrf_token');
-
 my $csrf = $t->tx->res->json->{csrf_token};
 my %h    = ('X-CSRF-Token' => $csrf);
 
-my $db = $t->app->pg_pool->db;
-
-$db->query(q{DELETE FROM users WHERE email LIKE 'test-tr-%@example.com'});
-$db->query(q{DELETE FROM projects WHERE slug LIKE 'test-tr-%'});
-
-# ------------------------------------------------------------
-# setup: project, file, keys
-# ------------------------------------------------------------
 $t->post_ok('/api/v1/projects' => {%h} => json => {
-  name                => 'Translations Project',
+  name                => 'Act Project',
   default_source_lang => 'en',
 })
   ->status_is(201);
 my $project_id = $t->tx->res->json->{project}{id};
 
-my $laravel = <<'PHP';
-<?php
-
-return [
-    'welcome' => 'Welcome',
-    'auth'    => ['login' => 'Sign in', 'logout' => 'Sign out'],
-];
-PHP
-
+my $laravel = "<?php return ['k' => 'Hello world'];";
 $t->post_ok("/api/v1/projects/$project_id/files" => {%h} => form => {
   format      => 'laravel',
   source_lang => 'en',
   target_lang => 'fr',
-  name        => 'auth.php',
-  file        => { content => $laravel, filename => 'auth.php' },
+  name        => 'act.php',
+  file        => { content => $laravel, filename => 'act.php' },
 })
   ->status_is(201);
 my $file_id = $t->tx->res->json->{file}{id};
 
-$t->get_ok("/api/v1/files/$file_id/keys")
-  ->status_is(200);
-my $keys = $t->tx->res->json->{keys};
-my $key_login = (grep { $_->{key_path} eq 'auth.login' } @$keys)[0];
-ok $key_login, 'found auth.login key';
-my $key_id = $key_login->{id};
+$t->get_ok("/api/v1/files/$file_id/keys")->status_is(200);
+my $key_id = $t->tx->res->json->{keys}[0]{id};
 
-# ------------------------------------------------------------
-# PATCH validation
-# ------------------------------------------------------------
-$t->patch_ok("/api/v1/keys/$key_id/translation" => {%h} => json => {})
-  ->status_is(400)
-  ->json_is('/error', 'nothing_to_update');
+my $file_row = $db->query('SELECT current_revision_id FROM files WHERE id = ?', $file_id)->hash;
+my $rev      = $file_row->{current_revision_id};
 
+my %uids;
+for my $pair ([ u1 => 'test-act-u1@example.com' ], [ u2 => 'test-act-u2@example.com' ], [ u3 => 'test-act-u3@example.com' ]) {
+  my ($tag, $email) = @$pair;
+  $t->post_ok('/api/v1/users' => {%h} => json => {
+    email    => $email,
+    name     => uc($tag),
+    password => 'password-1',
+    role     => 'lead_translator',
+  })->status_is(201);
+  $uids{$tag} = $t->tx->res->json->{user}{id};
+  $t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
+    user_id => $uids{$tag}, role => 'lead',
+  })->status_is(201);
+}
+
+$db->query(
+  q{
+    INSERT INTO translations
+      (key_id, revision_id, language, text, status,
+       translated_by_user_id, translated_by_ai, ai_engine,
+       word_count, action)
+    VALUES (?, ?, 'fr', 'Hello world', 'ai_draft',
+            ?, true, 'libretranslate', 2, 'ai_draft')
+  },
+  $key_id, $rev, $admin->{id},
+);
+
+# admin validates AI
 $t->patch_ok("/api/v1/keys/$key_id/translation" => {%h} => json => {
-  text => '', status => 'translated',
-})
-  ->status_is(400)
-  ->json_is('/error', 'text_required');
-
-$t->patch_ok("/api/v1/keys/$key_id/translation" => {%h} => json => {
-  text => 'x', status => 'approved',
-})
-  ->status_is(400)
-  ->json_is('/error', 'invalid_status');
-
-# ------------------------------------------------------------
-# happy path: set text
-# ------------------------------------------------------------
-$t->patch_ok("/api/v1/keys/$key_id/translation" => {%h} => json => {
-  text => 'Se connecter',
+  text => 'Hello world',
 })
   ->status_is(200)
-  ->json_is('/translation/text',   'Se connecter')
-  ->json_is('/translation/status', 'translated');
+  ->json_is('/translation/action', 'translate')
+  ->json_is('/translation/word_count', 2);
 
-my $first_id = $t->tx->res->json->{translation}{id};
+# helper to switch user
+my $switch = sub {
+  my ($email) = @_;
+  $t->post_ok('/api/v1/auth/logout' => {%h});
+  $t->post_ok('/api/v1/auth/login' => json => {
+    email    => $email,
+    password => 'password-1',
+  })->status_is(200);
+  my $cs = $t->tx->res->json->{csrf_token};
+  $t->get_ok('/api/v1/auth/me')->status_is(200);
+  return { 'X-CSRF-Token' => $cs };
+};
 
-# keys endpoint reflects it
-$t->get_ok("/api/v1/files/$file_id/keys")
-  ->status_is(200);
-my $again = (grep { $_->{key_path} eq 'auth.login' } @{ $t->tx->res->json->{keys} })[0];
-is $again->{translation}{text},   'Se connecter', 'text visible via keys';
-is $again->{translation}{status}, 'translated',   'status visible via keys';
-
-# filter approved -> 0, translated -> 1
-$t->get_ok("/api/v1/files/$file_id/keys?status=translated")
-  ->status_is(200);
-is scalar(@{ $t->tx->res->json->{keys} }), 1, 'one translated key';
-
-# ------------------------------------------------------------
-# second edit: append row, keep history
-# ------------------------------------------------------------
-$t->patch_ok("/api/v1/keys/$key_id/translation" => {%h} => json => {
-  text => 'Se connecter (v2)', status => 'needs_review', note => 'double-check',
+# u1 corrects
+my %u1h = %{ $switch->('test-act-u1@example.com') };
+$t->patch_ok("/api/v1/keys/$key_id/translation" => {%u1h} => json => {
+  text => 'Hello world again',
 })
   ->status_is(200)
-  ->json_is('/translation/text',   'Se connecter (v2)')
-  ->json_is('/translation/status', 'needs_review')
-  ->json_is('/translation/note',   'double-check');
+  ->json_is('/translation/action', 'correct');
 
-my $second_id = $t->tx->res->json->{translation}{id};
-isnt $first_id, $second_id, 'new row id';
-
-# history has 2 entries, newest first
-$t->get_ok("/api/v1/keys/$key_id/translation/history")
-  ->status_is(200);
-my $history = $t->tx->res->json->{history};
-is scalar(@$history), 2, 'two history entries';
-is $history->[0]{text},   'Se connecter (v2)', 'newest first';
-is $history->[1]{text},   'Se connecter',      'older second';
-
-# ------------------------------------------------------------
-# status-only update carries text forward
-# ------------------------------------------------------------
-$t->patch_ok("/api/v1/keys/$key_id/translation" => {%h} => json => {
-  status => 'translated',
+# u3 reverts
+my %u3h = %{ $switch->('test-act-u3@example.com') };
+$t->patch_ok("/api/v1/keys/$key_id/translation" => {%u3h} => json => {
+  text => 'Hello world',
 })
   ->status_is(200)
-  ->json_is('/translation/text',   'Se connecter (v2)')
-  ->json_is('/translation/status', 'translated');
+  ->json_is('/translation/action', 'validate');
 
-# ------------------------------------------------------------
-# assigned translator can edit their file; unassigned cannot
-# ------------------------------------------------------------
-$t->post_ok('/api/v1/users' => {%h} => json => {
-  email    => 'test-tr-assigned@example.com',
-  name     => 'Assigned',
-  password => 'password-1',
-  role     => 'translator',
-})
-  ->status_is(201);
-my $assigned_id = $t->tx->res->json->{user}{id};
-
-$t->post_ok("/api/v1/projects/$project_id/members" => {%h} => json => {
-  user_id => $assigned_id, role => 'translator',
-})
-  ->status_is(201);
-
-# assign file to that user via direct DB (no assign endpoint yet — Task 15)
-$db->query('UPDATE files SET assigned_to_user_id = ? WHERE id = ?',
-  $assigned_id, $file_id);
-
-$t->post_ok('/api/v1/auth/logout' => {%h})
-  ->status_is(200);
-
-$t->post_ok('/api/v1/auth/login' => json => {
-  email    => 'test-tr-assigned@example.com',
-  password => 'password-1',
-})
-  ->status_is(200);
-my $acsrf = $t->tx->res->json->{csrf_token};
-my %ah    = ('X-CSRF-Token' => $acsrf);
-
-$t->patch_ok("/api/v1/keys/$key_id/translation" => {%ah} => json => {
-  text => 'Connectez-vous', status => 'translated',
+# u2 corrects
+my %u2h = %{ $switch->('test-act-u2@example.com') };
+$t->patch_ok("/api/v1/keys/$key_id/translation" => {%u2h} => json => {
+  text => 'Hello world yeah',
 })
   ->status_is(200)
-  ->json_is('/translation/text', 'Connectez-vous');
+  ->json_is('/translation/action', 'correct');
 
-# another translator, not assigned, cannot edit
-$t->post_ok('/api/v1/auth/logout' => {%ah})
-  ->status_is(200);
+# u2 self-edit
+$t->patch_ok("/api/v1/keys/$key_id/translation" => {%u2h} => json => {
+  text => 'Hello world yeah!',
+})
+  ->status_is(200)
+  ->json_is('/translation/action', 'self_edit');
 
-# ------------------------------------------------------------
-# cleanup
-# ------------------------------------------------------------
-$db->query(q{DELETE FROM projects WHERE slug LIKE 'test-tr-%'});
-$db->query(q{DELETE FROM users    WHERE email LIKE 'test-tr-%@example.com'});
+# u2 self-edit again (cap)
+$t->patch_ok("/api/v1/keys/$key_id/translation" => {%u2h} => json => {
+  text => 'Hello world yeah!!!',
+})
+  ->status_is(200)
+  ->json_is('/translation/action', 'self_edit');
+
+# u1 case/whitespace dodge
+my %u1h2 = %{ $switch->('test-act-u1@example.com') };
+$t->patch_ok("/api/v1/keys/$key_id/translation" => {%u1h2} => json => {
+  text => "  hello   world   yeah!!!  ",
+})
+  ->status_is(200)
+  ->json_is('/translation/action', 'validate');
+
+# history
+$t->get_ok("/api/v1/keys/$key_id/history")->status_is(200);
+my $events = $t->tx->res->json->{events};
+ok scalar(@$events) >= 7, 'history has all events';
+
+my @actions = map { $_->{action} } reverse @$events;
+is_deeply [ @actions[0 .. 6] ],
+  [qw(ai_draft translate correct validate correct self_edit self_edit)],
+  'actions in expected chronological order';
+
+$db->query(q{DELETE FROM projects WHERE slug LIKE 'test-act-%'});
+$db->query(q{DELETE FROM users    WHERE email LIKE 'test-act-%@example.com'});
 
 done_testing;

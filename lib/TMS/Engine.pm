@@ -8,12 +8,12 @@ my %REGISTRY = (
 
 our $FOR_TEST;
 
-sub for ($class, $name, $opts = undef) {
+sub for ($class, $name, $config = undef) {
   die "TMS::Engine: unsupported engine '$name'\n"
     unless defined $name && exists $REGISTRY{$name};
 
   if ($FOR_TEST) {
-    my $fake = $FOR_TEST->($name, $opts);
+    my $fake = $FOR_TEST->($name, $config);
     return $fake if $fake;
   }
 
@@ -23,12 +23,16 @@ sub for ($class, $name, $opts = undef) {
 
   my %args;
   if ($name eq 'libretranslate') {
-    $args{url} = $ENV{LIBRETRANSLATE_URL};
-    $args{ua}  = $opts->{ua} if $opts && $opts->{ua};
+    $args{url} = $config && defined $config->{url}
+      ? $config->{url}
+      : $ENV{LIBRETRANSLATE_URL};
+    $args{ua} = $config->{ua} if $config && $config->{ua};
   }
   elsif ($name eq 'gemini') {
-    $args{api_key} = $ENV{GEMINI_API_KEY};
-    $args{ua}      = $opts->{ua} if $opts && $opts->{ua};
+    $args{api_key} = $config && defined $config->{api_key}
+      ? $config->{api_key}
+      : $ENV{GEMINI_API_KEY};
+    $args{ua} = $config->{ua} if $config && $config->{ua};
   }
 
   return $module->new(%args);

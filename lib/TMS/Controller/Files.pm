@@ -95,10 +95,12 @@ sub upload ($c) {
       $revision->{id}, $file->{id},
     );
 
-    for my $key_path (sort keys %$parsed) {
+    for my $key_path (sort CORE::keys %$parsed) {
+      my $text  = $parsed->{$key_path} // '';
+      my $count = _word_count($text);
       $c->db->query(
-        'INSERT INTO keys (file_id, key_path, source_text) VALUES (?, ?, ?)',
-        $file->{id}, $key_path, $parsed->{$key_path},
+        'INSERT INTO keys (file_id, key_path, source_text, word_count) VALUES (?, ?, ?, ?)',
+        $file->{id}, $key_path, $text, $count,
       );
     }
 
@@ -126,7 +128,7 @@ sub upload ($c) {
       source_lang => $file->{source_lang},
       target_lang => $file->{target_lang},
       status      => $file->{status},
-      keys_count  => scalar(keys %$parsed),
+      keys_count  => scalar(CORE::keys %$parsed),
       created_at  => $file->{created_at},
     },
   }, status => 201);
@@ -148,6 +150,7 @@ sub list_by_project ($c) {
              f.assigned_to_user_id, f.current_revision_id,
              f.created_at, f.updated_at,
              (SELECT count(*) FROM keys k WHERE k.file_id = f.id) AS keys_count,
+             (SELECT COALESCE(sum(k.word_count), 0) FROM keys k WHERE k.file_id = f.id) AS words_total,
              u.name  AS assigned_to_name,
              u.email AS assigned_to_email
         FROM files f
@@ -174,6 +177,7 @@ sub show ($c) {
              f.assigned_to_user_id, f.current_revision_id,
              f.created_at, f.updated_at,
              (SELECT count(*) FROM keys k WHERE k.file_id = f.id) AS keys_count,
+             (SELECT COALESCE(sum(k.word_count), 0) FROM keys k WHERE k.file_id = f.id) AS words_total,
              u.name  AS assigned_to_name,
              u.email AS assigned_to_email
         FROM files f
@@ -192,8 +196,34 @@ sub show ($c) {
     $file->{current_revision_id},
   )->hash;
 
+  my $counts = $c->db->query(
+    q{
+      SELECT
+        COALESCE(sum(t.word_count) FILTER (WHERE t.action = 'translate' AND t.translated_by_ai = false), 0) AS words_translated,
+        COALESCE(sum(t.word_count) FILTER (WHERE t.action = 'correct'), 0) AS words_corrected,
+        COALESCE(sum(t.word_count) FILTER (WHERE t.action = 'validate'), 0) AS words_validated,
+        COALESCE(sum(t.word_count) FILTER (WHERE t.action = 'self_edit'), 0) AS words_self_edits,
+        COALESCE(sum(k.word_count) FILTER (WHERE cur.action = 'ai_draft'), 0) AS words_ai_unchecked,
+        COALESCE(sum(k.word_count) FILTER (WHERE cur.status = 'approved'), 0) AS words_approved
+        FROM keys k
+        LEFT JOIN LATERAL (
+          SELECT action, status FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC, id DESC LIMIT 1
+        ) cur ON true
+        LEFT JOIN translations t
+          ON t.key_id = k.id
+         AND t.revision_id = ?
+         AND t.language = ?
+       WHERE k.file_id = ?
+    },
+    $file->{current_revision_id}, $file->{target_lang},
+    $file->{current_revision_id}, $file->{target_lang},
+    $file->{id},
+  )->hash;
+
   $c->render(json => {
-    file     => _public_file($file),
+    file => _public_file($file, $counts),
     revision => $revision ? {
       id              => 0 + $revision->{id},
       revision_number => 0 + $revision->{revision_number},
@@ -204,7 +234,7 @@ sub show ($c) {
   });
 }
 
-sub keys ($c) {
+sub list_keys ($c) {
   my $file_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
 
@@ -219,26 +249,72 @@ sub keys ($c) {
   return _err($c, 400, 'invalid_status')
     unless $status_filter =~ /\A(?:all|empty|ai_draft|translated|needs_review|approved|rejected)\z/;
 
+  my $search_q = $c->param('q') // '';
+  my $page     = $c->param('page') // 1;
+  my $per_page = $c->param('per_page') // 50;
+
+  $page     = 1   unless $page     =~ /\A\d+\z/ && $page     >= 1;
+  $per_page = 50  unless $per_page =~ /\A\d+\z/ && $per_page >= 1;
+  $per_page = 200 if $per_page > 200;
+
   my $with_previous = ($c->param('with_previous') // '') eq '1' ? 1 : 0;
 
   my $prev_revision_id;
   if ($with_previous) {
     my $prev = $c->db->query(
       q{
-        SELECT id
-          FROM file_revisions
+        SELECT id FROM file_revisions
          WHERE file_id = ? AND status = 'approved'
-         ORDER BY revision_number DESC
-         LIMIT 1
+         ORDER BY revision_number DESC LIMIT 1
       },
       $file->{id},
     )->hash;
     $prev_revision_id = $prev ? $prev->{id} : undef;
   }
 
+  my $where_extra = '';
+  my @where_extra_args;
+  if (length $search_q) {
+    $where_extra = ' AND (k.key_path ILIKE ? OR COALESCE(k.source_text, \'\') ILIKE ?)';
+    push @where_extra_args, "%$search_q%", "%$search_q%";
+  }
+
+  my $status_join_filter = '';
+  my @status_args;
+  if ($status_filter ne 'all') {
+    if ($status_filter eq 'empty') {
+      $status_join_filter = 'AND t.id IS NULL';
+    }
+    else {
+      $status_join_filter = 'AND t.status = ?';
+      push @status_args, $status_filter;
+    }
+  }
+
+  my $total = $c->db->query(
+    qq{
+      SELECT count(*) AS n
+        FROM keys k
+        LEFT JOIN LATERAL (
+          SELECT id, status FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC LIMIT 1
+        ) t ON true
+       WHERE k.file_id = ?
+        $where_extra
+        $status_join_filter
+    },
+    $file->{current_revision_id}, $file->{target_lang},
+    $file->{id},
+    @where_extra_args,
+    @status_args,
+  )->hash->{n};
+
+  my $offset = ($page - 1) * $per_page;
+
   my $rows = $c->db->query(
-    q{
-      SELECT k.id, k.key_path, k.source_text,
+    qq{
+      SELECT k.id, k.key_path, k.source_text, k.word_count,
              t.id           AS translation_id,
              t.text         AS translation_text,
              t.status       AS translation_status,
@@ -251,40 +327,27 @@ sub keys ($c) {
              p.status       AS prev_translation_status
         FROM keys k
         LEFT JOIN LATERAL (
-          SELECT *
-            FROM translations
-           WHERE key_id = k.id
-             AND revision_id = ?
-             AND language = ?
-           ORDER BY created_at DESC
-           LIMIT 1
+          SELECT * FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC LIMIT 1
         ) t ON true
         LEFT JOIN LATERAL (
-          SELECT *
-            FROM translations
-           WHERE key_id = k.id
-             AND revision_id = ?
-             AND language = ?
-           ORDER BY created_at DESC
-           LIMIT 1
+          SELECT * FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC LIMIT 1
         ) p ON true
        WHERE k.file_id = ?
-       ORDER BY k.key_path
+        $where_extra
+        $status_join_filter
+        ORDER BY k.key_path
+        LIMIT $per_page OFFSET $offset
     },
     $file->{current_revision_id}, $file->{target_lang},
-    $prev_revision_id // -1, $file->{target_lang},
-    $file_id,
+    $prev_revision_id // -1,       $file->{target_lang},
+    $file->{id},
+    @where_extra_args,
+    @status_args,
   )->hashes;
-
-  if ($status_filter ne 'all') {
-    if ($status_filter eq 'empty') {
-      @$rows = grep { !defined $_->{translation_id} } @$rows;
-    } else {
-      @$rows = grep {
-        defined $_->{translation_id} && ($_->{translation_status} // '') eq $status_filter
-      } @$rows;
-    }
-  }
 
   $c->render(json => {
     file => {
@@ -293,13 +356,119 @@ sub keys ($c) {
       target_lang => $file->{target_lang},
     },
     previous_revision_id => $prev_revision_id,
-    keys => [ map { _public_key($_, $with_previous) } @$rows ],
+    page        => 0 + $page,
+    per_page    => 0 + $per_page,
+    total       => 0 + $total,
+    total_pages => $total ? int(($total + $per_page - 1) / $per_page) : 0,
+    keys        => [ map { _public_key($_, $with_previous) } @$rows ],
+  });
+}
+
+sub member_stats ($c) {
+  my $file_id = $c->param('id');
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
+
+  my $file = $c->db->query(
+    'SELECT id, project_id, target_lang, current_revision_id FROM files WHERE id = ?',
+    $file_id,
+  )->hash;
+  return _err($c, 404, 'file_not_found') unless $file;
+  return undef unless $c->can_access_project($file->{project_id});
+
+  my $revision_id = $file->{current_revision_id};
+
+  my $rows = $c->db->query(
+    q{
+      SELECT t.translated_by_user_id AS user_id,
+             t.action,
+             COALESCE(sum(t.word_count), 0) AS words
+        FROM translations t
+        JOIN keys k ON k.id = t.key_id
+       WHERE k.file_id = ?
+         AND t.revision_id = ?
+         AND t.language = ?
+         AND t.translated_by_ai = false
+       GROUP BY t.translated_by_user_id, t.action
+    },
+    $file->{id}, $revision_id, $file->{target_lang},
+  )->hashes;
+
+  my %per_user;
+  my %total = (
+    words_translated   => 0,
+    words_corrected    => 0,
+    words_validated    => 0,
+    words_self_edits   => 0,
+  );
+
+  for my $r (@$rows) {
+    my $uid = $r->{user_id};
+    next unless defined $uid;
+    $per_user{$uid} //= {
+      words_translated => 0, words_corrected => 0,
+      words_validated  => 0, words_self_edits => 0,
+    };
+    my $w = 0 + ($r->{words} // 0);
+    if    ($r->{action} eq 'translate') { $per_user{$uid}{words_translated} += $w; $total{words_translated} += $w }
+    elsif ($r->{action} eq 'correct')   { $per_user{$uid}{words_corrected}  += $w; $total{words_corrected}  += $w }
+    elsif ($r->{action} eq 'validate')  { $per_user{$uid}{words_validated}  += $w; $total{words_validated}  += $w }
+    elsif ($r->{action} eq 'self_edit') { $per_user{$uid}{words_self_edits} += $w; $total{words_self_edits} += $w }
+  }
+
+  my $ai_unchecked = $c->db->query(
+    q{
+      SELECT COALESCE(sum(k.word_count), 0) AS n
+        FROM keys k
+        JOIN LATERAL (
+          SELECT action FROM translations
+           WHERE key_id = k.id AND revision_id = ? AND language = ?
+           ORDER BY created_at DESC, id DESC LIMIT 1
+        ) t ON true
+       WHERE k.file_id = ?
+         AND t.action = 'ai_draft'
+    },
+    $revision_id, $file->{target_lang}, $file->{id},
+  )->hash->{n};
+
+  my @members;
+  if (my @uids = sort { $a <=> $b } CORE::keys %per_user) {
+    my $placeholders = join(',', ('?') x @uids);
+    my $users = $c->db->query(
+      "SELECT id, name, email FROM users WHERE id IN ($placeholders)",
+      @uids,
+    )->hashes;
+    my %by_id = map { $_->{id} => $_ } @$users;
+    for my $uid (@uids) {
+      my $u = $by_id{$uid};
+      push @members, {
+        user_id          => 0 + $uid,
+        name             => $u ? $u->{name}  : '?',
+        email            => $u ? $u->{email} : '?',
+        words_translated => $per_user{$uid}{words_translated},
+        words_corrected  => $per_user{$uid}{words_corrected},
+        words_validated  => $per_user{$uid}{words_validated},
+        words_self_edits => $per_user{$uid}{words_self_edits},
+      };
+    }
+  }
+
+  $c->render(json => {
+    file_id     => 0 + $file->{id},
+    revision_id => 0 + $revision_id,
+    members     => \@members,
+    total       => {
+      words_translated   => 0 + $total{words_translated},
+      words_corrected    => 0 + $total{words_corrected},
+      words_validated    => 0 + $total{words_validated},
+      words_self_edits   => 0 + $total{words_self_edits},
+      words_ai_unchecked => 0 + $ai_unchecked,
+    },
   });
 }
 
 sub assign ($c) {
   my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
 
   my $file = $c->db->query(
     'SELECT id, project_id, status, assigned_to_user_id FROM files WHERE id = ?',
@@ -397,7 +566,7 @@ sub assign ($c) {
 
 sub unassign ($c) {
   my $file_id = $c->param('id');
-  return _err($c, 400, 'invalid_id') unless $file_id =~ /\A\d+\z/;
+  return _err($c, 400, 'invalid_id') unless defined $file_id && $file_id =~ /\A\d+\z/;
 
   my $file = $c->db->query(
     'SELECT id, project_id, status, assigned_to_user_id FROM files WHERE id = ?',
@@ -444,10 +613,8 @@ sub export ($c) {
 
   my $file = $c->db->query(
     q{
-      SELECT id, project_id, name, format, source_lang, target_lang,
-             current_revision_id
-        FROM files
-       WHERE id = ?
+      SELECT id, project_id, name, format, source_lang, target_lang, current_revision_id
+        FROM files WHERE id = ?
     },
     $file_id,
   )->hash;
@@ -522,11 +689,21 @@ sub export ($c) {
                    : $ext eq 'php'  ? 'text/x-php'
                    : $ext eq 'yaml' ? 'text/yaml'
                    : $ext eq 'arb'  ? 'application/json'
+                   : $ext eq 'js'   ? 'application/javascript'
                    : 'text/plain';
 
   $c->res->headers->content_type($content_type);
   $c->res->headers->content_disposition(qq{attachment; filename="$name"});
   $c->render(data => $body);
+}
+
+sub _word_count ($text) {
+  return 0 unless defined $text;
+  my $t = $text;
+  $t =~ s/^\s+|\s+$//g;
+  return 0 unless length $t;
+  my @words = grep { length } split /\s+/, $t;
+  return scalar @words;
 }
 
 sub _err ($c, $status, $code, $extra = undef) {
@@ -536,8 +713,8 @@ sub _err ($c, $status, $code, $extra = undef) {
   return undef;
 }
 
-sub _public_file ($f) {
-  return {
+sub _public_file ($f, $counts = undef) {
+  my %out = (
     id                  => 0 + $f->{id},
     project_id          => 0 + $f->{project_id},
     group_id            => defined $f->{group_id} ? 0 + $f->{group_id} : undef,
@@ -548,13 +725,21 @@ sub _public_file ($f) {
     is_source           => $f->{is_source} ? 1 : 0,
     status              => $f->{status},
     keys_count          => defined $f->{keys_count} ? 0 + $f->{keys_count} : 0,
+    words_total         => defined $f->{words_total} ? 0 + $f->{words_total} : 0,
     current_revision_id => defined $f->{current_revision_id} ? 0 + $f->{current_revision_id} : undef,
     assigned_to_user_id => defined $f->{assigned_to_user_id} ? 0 + $f->{assigned_to_user_id} : undef,
     assigned_to_name    => $f->{assigned_to_name},
     assigned_to_email   => $f->{assigned_to_email},
     created_at          => $f->{created_at},
     updated_at          => $f->{updated_at},
-  };
+  );
+  if ($counts) {
+    for my $k (qw(words_translated words_corrected words_validated
+                  words_self_edits words_ai_unchecked words_approved)) {
+      $out{$k} = 0 + ($counts->{$k} // 0);
+    }
+  }
+  return \%out;
 }
 
 sub _public_key ($r, $with_previous = 0) {
@@ -574,18 +759,15 @@ sub _public_key ($r, $with_previous = 0) {
     id          => 0 + $r->{id},
     key_path    => $r->{key_path},
     source_text => $r->{source_text},
+    word_count  => 0 + ($r->{word_count} // 0),
     translation => defined $r->{translation_id} ? \%t : undef,
   );
 
   if ($with_previous) {
     $out{previous_translation} = defined $r->{prev_translation_text}
-      ? {
-          text   => $r->{prev_translation_text},
-          status => $r->{prev_translation_status},
-        }
+      ? { text => $r->{prev_translation_text}, status => $r->{prev_translation_status} }
       : undef;
   }
-
   return \%out;
 }
 

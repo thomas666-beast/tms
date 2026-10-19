@@ -10,13 +10,23 @@
     <template v-else-if="project">
       <div v-if="!editing" class="file-header">
         <div>
-          <h1 class="file-title">{{ project.name }}</h1>
+          <h1 class="file-title">
+            {{ project.name }}
+            <span v-if="project.approved" class="badge status-approved">{{ t('projects.approved') }}</span>
+            <span v-else-if="project.files_total > 0" class="badge">{{ t('projects.inProgress') }}</span>
+          </h1>
           <div class="file-meta">
             <code>{{ project.slug }}</code>
             <span class="dot">·</span>
             <span>{{ t('projects.columns.sourceLang') }}: {{ project.default_source_lang }}</span>
             <span class="dot">·</span>
-            <span>{{ t('projects.columns.members') }}: {{ members.length }}</span>
+            <span>{{ project.files_total }} {{ t('projects.filesLabel') }}</span>
+            <span class="dot">·</span>
+            <span class="stat-approved">{{ project.files_approved }} {{ t('projects.approvedLabel') }}</span>
+            <span class="dot">·</span>
+            <span class="stat-open">{{ project.files_not_approved }} {{ t('projects.openLabel') }}</span>
+            <span class="dot">·</span>
+            <span>{{ formatNum(project.words_total) }} {{ t('projects.wordsLabel') }}</span>
           </div>
         </div>
         <div v-if="canManageMembers" class="row-actions">
@@ -82,6 +92,7 @@
               <th>{{ t('projects.memberUser') }}</th>
               <th>{{ t('users.columns.email') }}</th>
               <th>{{ t('projects.memberRole') }}</th>
+              <th class="num">{{ t('projects.wordsTranslated') }}</th>
               <th class="actions-col"></th>
             </tr>
           </thead>
@@ -90,6 +101,7 @@
               <td>{{ m.name }}</td>
               <td class="muted">{{ m.email }}</td>
               <td><span class="badge" :class="'role-' + m.role">{{ m.role }}</span></td>
+              <td class="num">{{ formatNum(m.words_translated) }}</td>
               <td class="row-actions-cell">
                 <button
                   v-if="canManageMembers && m.user_id !== auth.user?.id"
@@ -163,7 +175,8 @@
               <th>{{ t('files.columns.target') }}</th>
               <th>{{ t('files.columns.status') }}</th>
               <th>{{ t('files.columns.assignedTo') }}</th>
-              <th>{{ t('files.columns.keys') }}</th>
+              <th class="num">{{ t('files.columns.keys') }}</th>
+              <th class="num">{{ t('files.columns.words') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -171,9 +184,10 @@
               <td>{{ f.name }}</td>
               <td><code>{{ f.format }}</code></td>
               <td>{{ f.target_lang }}</td>
-              <td><span class="badge">{{ f.status }}</span></td>
+              <td><span class="badge" :class="'status-' + f.status">{{ f.status }}</span></td>
               <td>{{ f.assigned_to_name || t('files.unassigned') }}</td>
-              <td>{{ f.keys_count }}</td>
+              <td class="num">{{ f.keys_count }}</td>
+              <td class="num">{{ formatNum(f.words_total) }}</td>
             </tr>
           </tbody>
         </table>
@@ -230,7 +244,7 @@ async function loadFormats() {
     const data = await api.get('/api/v1/formats')
     formats.value = data.formats || []
     if (formats.value.length) uploadDraft.format = formats.value[0].code
-  } catch (_) { /* ignore */ }
+  } catch (_) {}
 }
 
 async function load() {
@@ -352,6 +366,8 @@ async function submitUpload() {
   } catch (e) { error.value = e.message }
   finally { uploading.value = false }
 }
+
+function formatNum(n) { return (n ?? 0).toLocaleString() }
 
 onMounted(load)
 </script>

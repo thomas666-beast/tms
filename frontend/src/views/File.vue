@@ -22,6 +22,10 @@
               rev #{{ revision.revision_number }} · {{ revision.status }}
             </span>
           </div>
+          <div class="file-stats">
+            <span><strong>{{ formatNum(file.words_total) }}</strong> {{ t('files.detail.statWords') }}</span>
+            <span class="stat-approved"><strong>{{ formatNum(file.words_approved || 0) }}</strong> {{ t('files.detail.statApproved') }}</span>
+          </div>
         </div>
         <div class="row-actions">
           <a :href="`/api/v1/files/${file.id}/export`" class="btn-link" target="_blank">
@@ -62,10 +66,62 @@
         <button v-if="canSubmit" @click="submit" :disabled="busy" class="primary">
           {{ t('workflow.submit') }}
         </button>
+
+        <button
+          v-if="revisionOpen && canEditSomething"
+          @click="translateFile"
+          :disabled="busy || bulkRunning || !aiEnabled"
+          class="primary translate-file-btn"
+          :title="aiEnabled ? '' : t('files.detail.aiDisabled')"
+        >
+          <span v-if="!aiEnabled">{{ t('files.detail.aiNotConfigured') }}</span>
+          <span v-else-if="bulkRunning">{{ t('files.detail.translating') }}</span>
+          <span v-else>{{ t('files.detail.translateFile') }}</span>
+        </button>
+
         <label v-if="hasPrevious" class="compare-toggle">
-          <input type="checkbox" v-model="compare" @change="reload" />
+          <input type="checkbox" v-model="compare" @change="reload(1)" />
           {{ t('workflow.compareMode') }}
         </label>
+      </div>
+
+      <div v-if="bulkRunning" class="translate-banner">
+        {{ t('files.detail.translatingHint') }}
+      </div>
+      <div v-else-if="lastBulk && lastBulk.total > 0" class="translate-banner translate-banner-ok">
+        {{ t('files.detail.translateDone', {
+          translated: lastBulk.translated,
+          review: lastBulk.needs_review,
+          errors: lastBulk.errors,
+        }) }}
+      </div>
+
+      <div v-if="stats" class="stats-panel">
+        <h3>{{ t('files.detail.statsTitle') }}</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{{ t('files.detail.statsMember') }}</th>
+              <th class="num">{{ t('files.detail.statsTranslated') }}</th>
+              <th class="num">{{ t('files.detail.statsCorrected') }}</th>
+              <th class="num">{{ t('files.detail.statsSelfEdits') }}</th>
+              <th class="num">{{ t('files.detail.statsValidated') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in stats.members" :key="m.user_id">
+              <td>{{ m.name }}</td>
+              <td class="num">{{ formatNum(m.words_translated) }}</td>
+              <td class="num">{{ formatNum(m.words_corrected) }}</td>
+              <td class="num muted">{{ formatNum(m.words_self_edits) }}</td>
+              <td class="num muted">{{ formatNum(m.words_validated) }}</td>
+            </tr>
+            <tr>
+              <td class="muted">{{ t('files.detail.statsAiUnchecked') }}</td>
+              <td colspan="4" class="num">{{ formatNum(stats.total.words_ai_unchecked) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div v-if="isInReview" class="review-layout">
@@ -139,7 +195,7 @@
       <div class="editor-toolbar">
         <label>
           {{ t('files.detail.filter') }}
-          <select v-model="filter" @change="reload">
+          <select v-model="filter" @change="reload(1)" :disabled="bulkRunning">
             <option value="all">{{ t('files.detail.filterAll') }}</option>
             <option value="empty">{{ t('files.detail.filterEmpty') }}</option>
             <option value="needs_review">{{ t('files.detail.filterNeeds') }}</option>
@@ -149,24 +205,15 @@
         </label>
         <label>
           {{ t('files.detail.search') }}
-          <input v-model="search" placeholder="key or source" />
+          <input v-model="search" @change="reload(1)" placeholder="key or source" :disabled="bulkRunning" />
         </label>
-        <label v-if="aiEnabled">
-          {{ t('files.detail.aiEngine') }}
-          <select v-model="selectedEngine">
-            <option v-for="e in enabledEngines" :key="e.name" :value="e.name">{{ e.label }}</option>
-          </select>
-        </label>
-        <button v-if="canAiBulk && aiEnabled" @click="aiBulk" :disabled="busy || bulkRunning">
-          {{ bulkRunning ? t('files.detail.aiRunning') : t('files.detail.aiTranslateAll') }}
-        </button>
       </div>
 
       <div v-if="keys.length === 0" class="empty-block">
         <p>{{ t('files.detail.noKeys') }}</p>
       </div>
 
-      <div v-else class="editor-table-wrap">
+      <div v-else class="editor-table-wrap" :class="{ 'is-busy': bulkRunning }">
         <table class="table-keys">
           <thead>
             <tr>
@@ -178,13 +225,23 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="k in visibleKeys" :key="k.id" :class="rowClass(k)">
+            <tr v-for="k in keys" :key="k.id" :class="rowClass(k)">
               <td><code>{{ k.key_path }}</code></td>
               <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
               <td>
-                <textarea v-model="draft[k.id].text" :disabled="!canEdit(k)" rows="2" class="translation-input"></textarea>
-                <input v-if="draft[k.id].status === 'needs_review'" v-model="draft[k.id].note"
-                  class="note-input" :placeholder="t('files.detail.note')" :disabled="!canEdit(k)" />
+                <textarea
+                  v-model="draft[k.id].text"
+                  :disabled="!canEdit(k) || bulkRunning"
+                  rows="2"
+                  class="translation-input"
+                ></textarea>
+                <input
+                  v-if="draft[k.id].status === 'needs_review'"
+                  v-model="draft[k.id].note"
+                  class="note-input"
+                  :placeholder="t('files.detail.note')"
+                  :disabled="!canEdit(k) || bulkRunning"
+                />
               </td>
               <td>
                 <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
@@ -192,10 +249,15 @@
                 </span>
               </td>
               <td class="row-actions-cell">
-                <button v-if="canEdit(k)" @click="save(k)" :disabled="busy" class="small">
+                <button v-if="canEdit(k)" @click="save(k)" :disabled="busy || bulkRunning" class="small">
                   {{ t('files.detail.save') }}
                 </button>
-                <button v-if="canEdit(k) && aiEnabled" @click="aiOne(k)" :disabled="busy || bulkRunning" class="small ghost">
+                <button
+                  v-if="canEdit(k) && aiEnabled"
+                  @click="aiOne(k)"
+                  :disabled="busy || bulkRunning"
+                  class="small ghost"
+                >
                   {{ t('files.detail.ai') }}
                 </button>
                 <span v-if="draft[k.id].savedAt" class="saved">✓</span>
@@ -203,11 +265,21 @@
             </tr>
           </tbody>
         </table>
-      </div>
 
-      <p v-if="!aiEnabled" class="muted small-text">
-        {{ t('files.detail.aiDisabled') }}
-      </p>
+        <div class="pagination">
+          <span class="muted small-text">
+            {{ t('files.detail.pagination', {
+              from: (page - 1) * per_page + 1,
+              to:   Math.min(page * per_page, total),
+              total,
+            }) }}
+          </span>
+          <div class="row-actions">
+            <button @click="reload(page - 1)" :disabled="page <= 1 || bulkRunning" class="small ghost">{{ t('files.detail.prev') }}</button>
+            <button @click="reload(page + 1)" :disabled="page >= totalPages || bulkRunning" class="small ghost">{{ t('files.detail.next') }}</button>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -232,11 +304,11 @@ const approvalStats = ref({ approve_count: 0, quorum_met: 0, has_admin: 0 })
 const members = ref([])
 const project = ref(null)
 const previousRevisionId = ref(null)
+const stats = ref(null)
 
-const engines = ref([])
-const selectedEngine = ref(localStorage.getItem('tms.aiEngine') || 'libretranslate')
+const aiEnabled = ref(false)
 const bulkRunning = ref(false)
-const bulkProgress = ref({ done: 0, total: 0 })
+const lastBulk = ref(null)
 
 const loading = ref(true)
 const busy = ref(false)
@@ -245,6 +317,10 @@ const error = ref('')
 const filter = ref('all')
 const search = ref('')
 const compare = ref(false)
+const page = ref(1)
+const per_page = ref(50)
+const total = ref(0)
+const totalPages = ref(0)
 const draft = reactive({})
 const assignChoice = ref('')
 const approveComment = ref('')
@@ -265,28 +341,19 @@ const canManageAssignment = computed(() => isProjectAdmin.value)
 const assignableMembers = computed(() =>
   members.value.filter(m => m.role === 'translator' || m.role === 'lead'))
 
-const enabledEngines = computed(() => engines.value.filter(e => e.enabled))
-const aiEnabled = computed(() => enabledEngines.value.length > 0)
-
 function canEdit(k) {
   if (!revisionOpen.value) return false
   return isProjectLead.value || isAssigned.value
 }
+const canEditSomething = computed(() => isProjectLead.value || isAssigned.value)
 const canSubmit = computed(() => revisionOpen.value && isProjectLead.value && file.value?.status !== 'in_review')
 const canApprove = computed(() => isInReview.value && (isProjectLead.value || isGlobalAdmin.value))
-const canAiBulk = computed(() => revisionOpen.value && isProjectLead.value)
 
 const hasPrevious = computed(() => previousRevisionId.value != null)
 const projectLink = computed(() => project.value ? `/projects/${project.value.id}` : '/projects')
-const visibleKeys = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  if (!q) return keys.value
-  return keys.value.filter(k =>
-    k.key_path.toLowerCase().includes(q) ||
-    (k.source_text || '').toLowerCase().includes(q))
-})
 function rowClass(k) { return `row-${k.translation?.status || 'empty'}` }
 function statusLabel(s) { return t(`files.status.${s || 'empty'}`) }
+function formatNum(n) { return (n ?? 0).toLocaleString() }
 
 function errMsg(e) {
   const code = e?.data?.error
@@ -299,11 +366,9 @@ function errMsg(e) {
 async function loadEngines() {
   try {
     const data = await api.get('/api/v1/ai/engines')
-    engines.value = data.engines || []
-    if (aiEnabled.value && !enabledEngines.value.find(e => e.name === selectedEngine.value)) {
-      selectedEngine.value = enabledEngines.value[0].name
-    }
-  } catch (_) { /* ignore */ }
+    const list = data.engines || []
+    aiEnabled.value = list.some(e => e.enabled && e.name === 'libretranslate')
+  } catch (_) { aiEnabled.value = false }
 }
 
 async function load() {
@@ -320,7 +385,8 @@ async function load() {
     members.value = proj.members || []
 
     await loadEngines()
-    await reload()
+    await reload(1)
+    await loadStats()
 
     if (revision.value?.status === 'in_review') {
       await loadApprovals(id)
@@ -345,15 +411,25 @@ async function loadApprovals(id) {
   }
 }
 
-async function reload() {
+async function loadStats() {
+  try {
+    stats.value = await api.get(`/api/v1/files/${file.value.id}/member_stats`)
+  } catch (_) { stats.value = null }
+}
+
+async function reload(p = page.value) {
+  if (p < 1) p = 1
+  page.value = p
   const id = route.params.id
-  const params = []
+  const params = [`page=${p}`, `per_page=${per_page.value}`]
   if (filter.value !== 'all') params.push(`status=${filter.value}`)
   if (compare.value)         params.push('with_previous=1')
-  const q = params.length ? '?' + params.join('&') : ''
-  const data = await api.get(`/api/v1/files/${id}/keys${q}`)
+  if (search.value.trim())   params.push(`q=${encodeURIComponent(search.value.trim())}`)
+  const data = await api.get(`/api/v1/files/${id}/keys?${params.join('&')}`)
   keys.value = data.keys || []
   previousRevisionId.value = data.previous_revision_id ?? null
+  total.value = data.total || 0
+  totalPages.value = data.total_pages || 0
   for (const k of keys.value) {
     if (!draft[k.id]) {
       draft[k.id] = {
@@ -368,8 +444,12 @@ async function reload() {
   }
 }
 
-function rememberEngine() {
-  if (selectedEngine.value) localStorage.setItem('tms.aiEngine', selectedEngine.value)
+async function refreshFile() {
+  try {
+    const data = await api.get(`/api/v1/files/${route.params.id}`)
+    file.value = data.file
+    revision.value = data.revision
+  } catch (_) {}
 }
 
 async function assign() {
@@ -408,38 +488,46 @@ async function save(k) {
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
     draft[k.id].savedAt = Date.now()
+    await loadStats()
+    await refreshFile()
   } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
 async function aiOne(k) {
-  rememberEngine()
   busy.value = true
   error.value = ''
   try {
-    const data = await api.post(`/api/v1/keys/${k.id}/ai_translate`, { engine: selectedEngine.value })
+    const data = await api.post(`/api/v1/keys/${k.id}/ai_translate`, {
+      engine: 'libretranslate',
+    })
     k.translation = data.translation
     draft[k.id].text = data.translation.text || ''
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
+    await loadStats()
+    await refreshFile()
   } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
 }
 
-async function aiBulk() {
-  rememberEngine()
+async function translateFile() {
   bulkRunning.value = true
-  bulkProgress.value = { done: 0, total: 0 }
   error.value = ''
+  lastBulk.value = null
   try {
-    const data = await api.post(`/api/v1/files/${file.value.id}/ai_translate`, { engine: selectedEngine.value })
-    bulkProgress.value = {
-      done: (data.translated || 0) + (data.needs_review || 0) + (data.errors || 0),
-      total: data.total || 0,
-    }
-    await reload()
-  } catch (e) { error.value = errMsg(e) }
-  finally { bulkRunning.value = false }
+    const data = await api.post(`/api/v1/files/${file.value.id}/ai_translate`, {
+      engine: 'libretranslate',
+    })
+    lastBulk.value = data
+    await reload(1)
+    await loadStats()
+    await refreshFile()
+  } catch (e) {
+    error.value = errMsg(e)
+  } finally {
+    bulkRunning.value = false
+  }
 }
 
 async function submit() {

@@ -3,6 +3,7 @@ use Mojo::Base -base, -signatures;
 use Role::Tiny;
 
 with 'TMS::Adapter::Role';
+with 'TMS::Adapter::Nested';
 
 use Mojo::JSON qw(decode_json);
 
@@ -15,50 +16,13 @@ sub parse ($self, $content) {
   die "VueI18n: invalid JSON: $@" unless defined $tree;
   die "VueI18n: expected a JSON object at the top level\n"
     unless ref $tree eq 'HASH';
-  return _flatten($tree, '');
+  return $self->flatten_node($tree, '');
 }
 
 sub serialize ($self, $hash) {
   die "VueI18n: expected a hashref\n" unless ref $hash eq 'HASH';
-  my $tree = _nest($hash);
+  my $tree = $self->nest_flat($hash);
   return _encode_sorted($tree, 0) . "\n";
-}
-
-sub _flatten ($node, $prefix) {
-  if (ref $node eq 'HASH') {
-    my %out;
-    for my $k (sort keys %$node) {
-      my $sub_prefix = length $prefix ? "$prefix.$k" : $k;
-      %out = (%out, %{ _flatten($node->{$k}, $sub_prefix) });
-    }
-    return \%out;
-  }
-  if (ref $node eq 'ARRAY') {
-    my %out;
-    my $i = 0;
-    for my $v (@$node) {
-      my $sub_prefix = length $prefix ? "$prefix.$i" : "$i";
-      %out = (%out, %{ _flatten($v, $sub_prefix) });
-      $i++;
-    }
-    return \%out;
-  }
-  return { $prefix => defined $node ? "$node" : '' };
-}
-
-sub _nest ($hash) {
-  my %root;
-  for my $key (keys %$hash) {
-    my @parts = split /\./, $key, -1;
-    my $ref = \%root;
-    while (@parts > 1) {
-      my $p = shift @parts;
-      $ref->{$p} = {} unless ref $ref->{$p} eq 'HASH';
-      $ref = $ref->{$p};
-    }
-    $ref->{ $parts[0] } = $hash->{$key};
-  }
-  return \%root;
 }
 
 sub _encode_sorted ($node, $depth) {

@@ -29,15 +29,24 @@
         :key="p.id"
         :to="`/projects/${p.id}`"
         class="project-card"
+        :class="p.approved ? 'project-card-approved' : 'project-card-open'"
       >
         <div class="project-card-title">
           <span class="project-name">{{ p.name }}</span>
-          <span v-if="p.member_role" class="badge">{{ p.member_role }}</span>
+          <span v-if="p.approved" class="badge status-approved">{{ t('projects.approved') }}</span>
+          <span v-else-if="p.files_total === 0" class="badge">{{ t('projects.noFiles') }}</span>
+          <span v-else class="badge">{{ t('projects.inProgress') }}</span>
         </div>
         <div class="project-card-meta">
           <code>{{ p.slug }}</code>
           <span class="dot">·</span>
           <span>{{ p.default_source_lang }}</span>
+        </div>
+        <div class="project-card-stats">
+          <span><strong>{{ p.files_total }}</strong> {{ t('projects.filesLabel') }}</span>
+          <span class="stat-approved"><strong>{{ p.files_approved }}</strong> {{ t('projects.approvedLabel') }}</span>
+          <span class="stat-open"><strong>{{ p.files_not_approved }}</strong> {{ t('projects.openLabel') }}</span>
+          <span><strong>{{ formatNum(p.words_total) }}</strong> {{ t('projects.wordsLabel') }}</span>
         </div>
         <div class="project-card-foot">
           <span>{{ t('projects.columns.members') }}: {{ p.members_count ?? 0 }}</span>
@@ -100,6 +109,7 @@ async function createProject() {
 }
 
 function formatDate(iso) { return iso ? new Date(iso).toLocaleDateString() : '' }
+function formatNum(n) { return (n ?? 0).toLocaleString() }
 
 onMounted(load)
 </script>
