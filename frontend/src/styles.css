@@ -1141,3 +1141,62 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
   margin-top: 4px;
   margin-bottom: 8px;
 }
+
+.memory-panel {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-l);
+}
+.memory-panel h4 { margin: 0 0 8px 0; font-size: 13px; color: var(--accent); text-transform: uppercase; }
+.memory-panel ul { list-style: none; padding: 0; margin: 0; max-height: 200px; overflow-y: auto; }
+.memory-panel li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.memory-panel li:hover { background: #f9fafb; }
+.tm-source { font-size: 13px; color: var(--muted); flex: 1; }
+.tm-target { font-size: 14px; font-weight: 500; color: var(--text); flex: 1; }
+
+/* Memory in modal */
+.expanded-memory {
+  margin-bottom: 16px;
+  position: relative;
+}
+.expanded-memory input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+}
+.modal-memory-results {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 150px;
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+}
+.modal-memory-results li {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.modal-memory-results li:hover { background: #f9fafb; }
+.modal-memory-results li:last-child { border-bottom: none; }
+
+.tm-source small {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}

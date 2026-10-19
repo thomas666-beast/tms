@@ -15,7 +15,8 @@ sub edit ($c) {
              f.target_lang,
              f.status       AS file_status,
              f.assigned_to_user_id,
-             f.current_revision_id
+             f.current_revision_id,
+             f.lock_version
         FROM keys k
         JOIN files f ON f.id = k.file_id
        WHERE k.id = ?
@@ -49,9 +50,15 @@ sub edit ($c) {
   my $text   = exists $body->{text}   ? $body->{text}   : undef;
   my $status = exists $body->{status} ? $body->{status} : undef;
   my $note   = exists $body->{note}   ? $body->{note}   : undef;
+  my $client_lock = $body->{lock_version};
 
   return _err($c, 400, 'nothing_to_update')
     unless defined $text || defined $status || defined $note;
+
+  # Lock check
+  if (defined $client_lock && $client_lock != $key->{lock_version}) {
+    return $c->render(json => { error => 'stale_data' }, status => 409);
+  }
 
   if (defined $text && !length $text) {
     return _err($c, 400, 'text_required');
@@ -93,48 +100,74 @@ sub edit ($c) {
     history   => $history,
   );
 
-  my $row = $c->db->query(
-    q{
-      INSERT INTO translations
-        (key_id, revision_id, language, text, status, note,
-         translated_by_user_id, translated_by_ai, ai_engine,
-         word_count, action)
-      VALUES (?, ?, ?, ?, ?, ?, ?, false, NULL, ?, ?)
-      RETURNING id, text, status, note, translated_by_user_id,
-                translated_by_ai, ai_engine, created_at, word_count, action
-    },
-    $key->{id}, $key->{current_revision_id}, $key->{target_lang},
-    $final_text, $final_status, $final_note,
-    $me->{id},
-    $key->{word_count} // 0,
-    $action,
-  )->hash;
+  my $new_lock;
+  eval {
+    $c->db->query('BEGIN');
 
-  _audit($c, 'translation.edit', $key->{id}, {
-    key_path    => $key->{key_path},
-    revision_id => 0 + $key->{current_revision_id},
-    text        => $final_text,
-    status      => $final_status,
-    note        => $final_note,
-    action      => $action,
-  });
+    # Re-check lock within transaction
+    my $current_lock = $c->db->query('SELECT lock_version FROM files WHERE id = ? FOR UPDATE', $key->{file_id})->hash->{lock_version};
+    if (defined $client_lock && $client_lock != $current_lock) {
+      die "stale";
+    }
 
-  $c->render(json => {
-    translation => {
-      id                    => 0 + $row->{id},
-      text                  => $row->{text},
-      status                => $row->{status},
-      note                  => $row->{note},
-      translated_by_user_id => 0 + $row->{translated_by_user_id},
-      translated_by_ai      => 0,
-      ai_engine             => undef,
-      word_count            => 0 + $row->{word_count},
-      action                => $row->{action},
-      created_at            => $row->{created_at},
-    },
-  });
+    my $row = $c->db->query(
+      q{
+        INSERT INTO translations
+          (key_id, revision_id, language, text, status, note,
+           translated_by_user_id, translated_by_ai, ai_engine,
+           word_count, action)
+        VALUES (?, ?, ?, ?, ?, ?, ?, false, NULL, ?, ?)
+        RETURNING id, text, status, note, translated_by_user_id,
+                  translated_by_ai, ai_engine, created_at, word_count, action
+      },
+      $key->{id}, $key->{current_revision_id}, $key->{target_lang},
+      $final_text, $final_status, $final_note,
+      $me->{id},
+      $key->{word_count} // 0,
+      $action,
+    )->hash;
+
+    $new_lock = $c->db->query(
+      'UPDATE files SET lock_version = lock_version + 1 WHERE id = ? RETURNING lock_version',
+      $key->{file_id}
+    )->hash->{lock_version};
+
+    _audit($c, 'translation.edit', $key->{id}, {
+      key_path    => $key->{key_path},
+      revision_id => 0 + $key->{current_revision_id},
+      text        => $final_text,
+      status      => $final_status,
+      note        => $final_note,
+      action      => $action,
+    });
+
+    $c->db->query('COMMIT');
+
+    $c->render(json => {
+      translation => {
+        id                    => 0 + $row->{id},
+        text                  => $row->{text},
+        status                => $row->{status},
+        note                  => $row->{note},
+        translated_by_user_id => 0 + $row->{translated_by_user_id},
+        translated_by_ai      => 0,
+        ai_engine             => undef,
+        word_count            => 0 + $row->{word_count},
+        action                => $row->{action},
+        created_at            => $row->{created_at},
+      },
+      lock_version => $new_lock,
+    });
+    1;
+  } or do {
+    my $err = $@;
+    eval { $c->db->query('ROLLBACK') };
+    if ($err =~ /stale/) {
+      return $c->render(json => { error => 'stale_data' }, status => 409);
+    }
+    return _err($c, 500, 'save_failed');
+  };
 }
-
 sub history ($c) {
   my $key_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $key_id =~ /\A\d+\z/;

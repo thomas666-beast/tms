@@ -132,12 +132,14 @@
               <code class="review-key-path">{{ k.key_path }}</code>
               <div class="review-key-body">
                 <div class="review-cell">
+                  <div class="review-cell-label">{{ t('files.detail.colSource') }}</div>
+                  <div class="review-text">{{ k.source_text }}</div>
+                </div>
+                <div class="review-cell">
                   <div class="review-cell-label">{{ t('files.detail.colTranslation') }}</div>
                   <div :class="'review-text status-' + (k.translation?.status || 'empty')">
                     {{ k.translation?.text || '—' }}
                   </div>
-                  
-                  <!-- New author line -->
                   <div class="review-author">
                     <span v-if="k.translation?.translated_by_ai" class="muted">
                       AI ({{ k.translation.ai_engine || '?' }})
@@ -230,6 +232,30 @@
             <option value="ai_unchecked">{{ t('files.detail.attAi') }}</option>
           </select>
         </label>
+        <label>
+          Memory
+          <input 
+            v-model="tmSearch" 
+            @input="searchMemory" 
+            placeholder="Find past translations..." 
+            :disabled="bulkRunning"
+          />
+        </label>
+      </div>
+
+      <!-- Memory Results for Main Table -->
+      <div v-if="tmResults.length > 0" class="memory-panel">
+        <h4>Translation Memory</h4>
+        <ul>
+          <li v-for="(r, i) in tmResults" :key="i" @click="applySuggestion(r.translation_text)">
+            <div class="tm-source">
+              {{ r.source_text }}
+              <small class="muted">{{ r.file_name }} ({{ r.key_path }})</small>
+            </div>
+            <div class="tm-target">{{ r.translation_text }}</div>
+            <span class="badge">{{ r.target_lang }}</span>
+          </li>
+        </ul>
       </div>
 
       <div v-if="keys.length === 0" class="empty-block">
@@ -254,6 +280,7 @@
               <td>
                 <textarea
                   v-model="draft[k.id].text"
+                  @focus="setFocus(k)"
                   :disabled="!canEdit(k) || bulkRunning"
                   class="translation-input textarea-auto"
                 ></textarea>
@@ -317,19 +344,37 @@
       @close="historyVisible = false" 
     />
 
+    <!-- Expand Modal -->
     <div v-if="expandedKey" class="modal-backdrop" @click.self="closeExpanded">
       <div class="modal-card expanded-modal">
         <div class="row">
           <h3>{{ expandedKey.key_path }}</h3>
           <button @click="closeExpanded" class="ghost small">✕</button>
         </div>
+        
         <div class="expanded-source">
           <strong>Source:</strong>
           <p>{{ expandedKey.source_text }}</p>
         </div>
+
+        <div class="expanded-memory">
+          <input 
+            v-model="tmModalSearch" 
+            @input="searchModalMemory" 
+            placeholder="Search memory..." 
+          />
+          <ul v-if="tmModalResults.length > 0" class="modal-memory-results">
+            <li v-for="(r, i) in tmModalResults" :key="i" @click="applyModalSuggestion(r.translation_text)">
+              <div class="tm-target">{{ r.translation_text }}</div>
+              <small class="muted">{{ r.source_text }} — {{ r.file_name }}</small>
+            </li>
+          </ul>
+        </div>
+
         <div class="expanded-target">
           <textarea v-model="expandedDraft.text" rows="8" class="translation-input large-textarea"></textarea>
         </div>
+        
         <div class="row-actions" style="justify-content: flex-end; margin-top: 16px;">
           <button @click="closeExpanded" class="ghost">Cancel</button>
           <button @click="saveExpanded" :disabled="busy" class="primary">Save</button>
@@ -344,11 +389,13 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 import { api } from '../api'
 import HistoryPanel from '../components/HistoryPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const toast = useToastStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -389,6 +436,14 @@ const historyVisible = ref(false)
 
 const expandedKey = ref(null)
 const expandedDraft = reactive({ text: '' })
+const focusedKeyId = ref(null)
+
+const tmSearch = ref('')
+const tmResults = ref([])
+const tmLoading = ref(false)
+
+const tmModalSearch = ref('')
+const tmModalResults = ref([])
 
 const myProjectRole = computed(() => {
   const me = members.value.find(m => m.user_id === auth.user?.id)
@@ -427,6 +482,61 @@ function errMsg(e) {
   return e.message
 }
 
+function setFocus(k) {
+  focusedKeyId.value = k.id
+}
+
+async function searchMemory() {
+  if (tmSearch.value.length < 3) {
+    tmResults.value = []
+    return
+  }
+  tmLoading.value = true
+  try {
+    const data = await api.get(`/api/v1/projects/${project.value.id}/memory?q=${encodeURIComponent(tmSearch.value)}`)
+    tmResults.value = data.results || []
+  } catch (e) {
+    console.error(e)
+  } finally {
+    tmLoading.value = false
+  }
+}
+
+function applySuggestion(text) {
+  let targetId = focusedKeyId.value || (keys.value.length > 0 ? keys.value[0].id : null)
+  
+  if (targetId) {
+    draft[targetId].text = text
+    draft[targetId].savedAt = null
+  }
+  
+  if (expandedKey.value && expandedKey.value.id === targetId) {
+    expandedDraft.text = text
+  }
+
+  tmResults.value = []
+  tmSearch.value = ''
+}
+
+async function searchModalMemory() {
+  if (tmModalSearch.value.length < 3) {
+    tmModalResults.value = []
+    return
+  }
+  try {
+    const data = await api.get(`/api/v1/projects/${project.value.id}/memory?q=${encodeURIComponent(tmModalSearch.value)}`)
+    tmModalResults.value = data.results || []
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+function applyModalSuggestion(text) {
+  expandedDraft.text = text
+  tmModalResults.value = []
+  tmModalSearch.value = ''
+}
+
 function openExpanded(k) {
   expandedKey.value = k
   expandedDraft.text = draft[k.id].text
@@ -434,6 +544,8 @@ function openExpanded(k) {
 
 function closeExpanded() {
   expandedKey.value = null
+  tmModalSearch.value = ''
+  tmModalResults.value = []
 }
 
 async function saveExpanded() {
@@ -588,19 +700,34 @@ async function save(k) {
   busy.value = true
   error.value = ''
   try {
-    const body = { text: next, status: nextStatus }
+    const body = { 
+      text: next, 
+      status: nextStatus,
+      lock_version: file.value.lock_version 
+    }
     if (nextStatus === 'needs_review') {
       body.note = nextNote
     }
+    
     const data = await api.patch(`/api/v1/keys/${k.id}/translation`, body)
+    
     k.translation = data.translation
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
     draft[k.id].savedAt = Date.now()
+    file.value.lock_version = data.lock_version
+    
     delete historyCounts[k.id]
     await loadStats()
     await refreshFile()
-  } catch (e) { error.value = errMsg(e) }
+  } catch (e) {
+    if (e.data && e.data.error === 'stale_data') {
+      toast.error('This file was updated in the background. Reloading to get the latest changes.')
+      await load()
+      return
+    }
+    error.value = errMsg(e)
+  }
   finally { busy.value = false }
 }
 
@@ -677,16 +804,6 @@ function openFile(kind) {
   if (kind === 'export-approved') {
     window.open(`/api/v1/files/${file.value.id}/export?revision=latest_approved`, '_blank')
   }
-}
-
-function formatLastAction(k) {
-  if (!k.translation) return t('files.detail.emptyCell')
-  if (k.translation.translated_by_ai) {
-    return `AI (${k.translation.ai_engine || '?'})`
-  }
-  const author = k.translation.translated_by_user_id === auth.user?.id ? 'You' : `User #${k.translation.translated_by_user_id}`
-  // We will improve this when the API sends user names in the translation object
-  return `${t('files.detail.actionLabels.' + (k.translation.status || 'empty'))} by ${author}`
 }
 
 onMounted(load)

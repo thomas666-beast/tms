@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE files
+  ADD COLUMN lock_version INT NOT NULL DEFAULT 1;
+
+COMMIT;
