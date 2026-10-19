@@ -245,9 +245,12 @@ sub list_keys ($c) {
   return _err($c, 404, 'file_not_found') unless $file;
   return undef unless $c->can_access_project($file->{project_id});
 
-  my $status_filter = $c->param('status') // 'all';
+  my $status_filter    = $c->param('status')    // 'all';
+  my $attention_filter = $c->param('attention') // '';
   return _err($c, 400, 'invalid_status')
     unless $status_filter =~ /\A(?:all|empty|ai_draft|translated|needs_review|approved|rejected)\z/;
+  return _err($c, 400, 'invalid_attention')
+    unless $attention_filter =~ /\A(?:|contested|hot|ai_unchecked)\z/;
 
   my $search_q = $c->param('q') // '';
   my $page     = $c->param('page') // 1;
@@ -291,23 +294,59 @@ sub list_keys ($c) {
     }
   }
 
+  my $attention_join = '';
+  my @attention_args;
+  if ($attention_filter eq 'contested') {
+    $attention_join = q{
+      AND (SELECT count(DISTINCT t2.translated_by_user_id)
+             FROM translations t2
+             JOIN keys k2 ON k2.id = t2.key_id
+            WHERE k2.id = k.id
+              AND t2.revision_id = ?
+              AND t2.language    = ?
+              AND t2.action = 'correct'
+              AND t2.translated_by_ai = false) >= 2
+    };
+    push @attention_args, $file->{current_revision_id}, $file->{target_lang};
+  }
+  elsif ($attention_filter eq 'hot') {
+    $attention_join = q{
+      AND (SELECT count(*)
+             FROM translations t2
+             JOIN keys k2 ON k2.id = t2.key_id
+            WHERE k2.id = k.id
+              AND t2.revision_id = ?
+              AND t2.language    = ?
+              AND t2.action IN ('correct','self_edit')
+              AND t2.translated_by_ai = false) >= 3
+    };
+    push @attention_args, $file->{current_revision_id}, $file->{target_lang};
+  }
+  elsif ($attention_filter eq 'ai_unchecked') {
+    $attention_join = q{
+      AND t.action = 'ai_draft'
+    };
+  }
+
   my $total = $c->db->query(
     qq{
       SELECT count(*) AS n
         FROM keys k
         LEFT JOIN LATERAL (
-          SELECT id, status FROM translations
+          SELECT id, status, action FROM translations
            WHERE key_id = k.id AND revision_id = ? AND language = ?
            ORDER BY created_at DESC LIMIT 1
         ) t ON true
        WHERE k.file_id = ?
         $where_extra
         $status_join_filter
+        $attention_join
     },
     $file->{current_revision_id}, $file->{target_lang},
     $file->{id},
     @where_extra_args,
     @status_args,
+    @attention_args,
   )->hash->{n};
 
   my $offset = ($page - 1) * $per_page;
@@ -324,13 +363,22 @@ sub list_keys ($c) {
              t.ai_engine,
              t.created_at   AS translation_created_at,
              p.text         AS prev_translation_text,
-             p.status       AS prev_translation_status
+             p.status       AS prev_translation_status,
+             u.name         AS author_name,
+             (SELECT count(DISTINCT t3.translated_by_user_id)
+                FROM translations t3
+               WHERE t3.key_id = k.id
+                 AND t3.revision_id = ?
+                 AND t3.language    = ?
+                 AND t3.action = 'correct'
+                 AND t3.translated_by_ai = false) AS distinct_correctors
         FROM keys k
         LEFT JOIN LATERAL (
           SELECT * FROM translations
            WHERE key_id = k.id AND revision_id = ? AND language = ?
            ORDER BY created_at DESC LIMIT 1
         ) t ON true
+        LEFT JOIN users u ON u.id = t.translated_by_user_id
         LEFT JOIN LATERAL (
           SELECT * FROM translations
            WHERE key_id = k.id AND revision_id = ? AND language = ?
@@ -339,14 +387,17 @@ sub list_keys ($c) {
        WHERE k.file_id = ?
         $where_extra
         $status_join_filter
+        $attention_join
         ORDER BY k.key_path
         LIMIT $per_page OFFSET $offset
     },
+    $file->{current_revision_id}, $file->{target_lang},
     $file->{current_revision_id}, $file->{target_lang},
     $prev_revision_id // -1,       $file->{target_lang},
     $file->{id},
     @where_extra_args,
     @status_args,
+    @attention_args,
   )->hashes;
 
   $c->render(json => {
@@ -752,6 +803,7 @@ sub _public_key ($r, $with_previous = 0) {
     $t{translated_by_user_id} = defined $r->{translated_by_user_id} ? 0 + $r->{translated_by_user_id} : undef;
     $t{translated_by_ai}      = $r->{translated_by_ai} ? 1 : 0;
     $t{ai_engine}             = $r->{ai_engine};
+    $t{author_name}           = $r->{author_name};
     $t{created_at}            = $r->{translation_created_at};
   }
 
@@ -761,6 +813,8 @@ sub _public_key ($r, $with_previous = 0) {
     source_text => $r->{source_text},
     word_count  => 0 + ($r->{word_count} // 0),
     translation => defined $r->{translation_id} ? \%t : undef,
+    contested   => ($r->{distinct_correctors} // 0) >= 2 ? 1 : 0,
+    distinct_correctors => 0 + ($r->{distinct_correctors} // 0),
   );
 
   if ($with_previous) {

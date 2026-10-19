@@ -46,6 +46,9 @@
           <span><strong>{{ p.files_total }}</strong> {{ t('projects.filesLabel') }}</span>
           <span class="stat-approved"><strong>{{ p.files_approved }}</strong> {{ t('projects.approvedLabel') }}</span>
           <span class="stat-open"><strong>{{ p.files_not_approved }}</strong> {{ t('projects.openLabel') }}</span>
+          <span v-if="p.files_contested > 0" class="stat-contested">
+            <strong>! {{ p.files_contested }}</strong> {{ t('projects.contestedLabel') }}
+          </span>
           <span><strong>{{ formatNum(p.words_total) }}</strong> {{ t('projects.wordsLabel') }}</span>
         </div>
         <div class="project-card-foot">

@@ -132,13 +132,19 @@
               <code class="review-key-path">{{ k.key_path }}</code>
               <div class="review-key-body">
                 <div class="review-cell">
-                  <div class="review-cell-label">{{ t('files.detail.colSource') }}</div>
-                  <div class="review-text">{{ k.source_text }}</div>
-                </div>
-                <div class="review-cell">
                   <div class="review-cell-label">{{ t('files.detail.colTranslation') }}</div>
                   <div :class="'review-text status-' + (k.translation?.status || 'empty')">
                     {{ k.translation?.text || '—' }}
+                  </div>
+                  
+                  <!-- New author line -->
+                  <div class="review-author">
+                    <span v-if="k.translation?.translated_by_ai" class="muted">
+                      AI ({{ k.translation.ai_engine || '?' }})
+                    </span>
+                    <span v-else-if="k.translation?.author_name" class="muted">
+                      {{ k.translation.author_name }}
+                    </span>
                   </div>
                   <small v-if="k.translation?.note" class="muted">{{ k.translation.note }}</small>
                   <div v-if="compare && k.previous_translation" class="review-previous">
@@ -150,6 +156,9 @@
                   <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
                     {{ statusLabel(k.translation?.status) }}
                   </span>
+                  <span v-if="k.contested" class="badge status-contested" :title="t('files.detail.contestedTip', { n: k.distinct_correctors })">
+                    {{ t('files.detail.contested') }}
+                  </span>
                 </div>
               </div>
               <div class="review-history-toggle">
@@ -157,7 +166,6 @@
                   {{ t('files.detail.historyLink', { n: historyCounts[k.id] ?? '·' }) }}
                 </button>
               </div>
-              <HistoryPanel v-if="openHistories[k.id]" :events="historyFor[k.id] || []" />
             </div>
           </div>
         </div>
@@ -213,6 +221,15 @@
           {{ t('files.detail.search') }}
           <input v-model="search" @change="reload(1)" placeholder="key or source" :disabled="bulkRunning" />
         </label>
+        <label>
+          {{ t('files.detail.attention') }}
+          <select v-model="attention" @change="reload(1)" :disabled="bulkRunning">
+            <option value="">{{ t('files.detail.attAll') }}</option>
+            <option value="contested">{{ t('files.detail.attContested') }}</option>
+            <option value="hot">{{ t('files.detail.attHot') }}</option>
+            <option value="ai_unchecked">{{ t('files.detail.attAi') }}</option>
+          </select>
+        </label>
       </div>
 
       <div v-if="keys.length === 0" class="empty-block">
@@ -231,54 +248,50 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="k in keys" :key="k.id">
-              <tr :class="rowClass(k)">
-                <td><code>{{ k.key_path }}</code></td>
-                <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
-                <td>
-                  <textarea
-                    v-model="draft[k.id].text"
-                    :disabled="!canEdit(k) || bulkRunning"
-                    rows="2"
-                    class="translation-input"
-                  ></textarea>
-                  <input
-                    v-if="draft[k.id].status === 'needs_review'"
-                    v-model="draft[k.id].note"
-                    class="note-input"
-                    :placeholder="t('files.detail.note')"
-                    :disabled="!canEdit(k) || bulkRunning"
-                  />
-                </td>
-                <td>
-                  <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
-                    {{ statusLabel(k.translation?.status) }}
-                  </span>
-                </td>
-                <td class="row-actions-cell">
-                  <button v-if="canEdit(k)" @click="save(k)" :disabled="busy || bulkRunning" class="small">
-                    {{ t('files.detail.save') }}
-                  </button>
-                  <button
-                    v-if="canEdit(k) && aiEnabled"
-                    @click="aiOne(k)"
-                    :disabled="busy || bulkRunning"
-                    class="small ghost"
-                  >
-                    {{ t('files.detail.ai') }}
-                  </button>
-                  <button class="small ghost" @click="toggleHistory(k.id)">
-                    {{ t('files.detail.historyLink', { n: historyCounts[k.id] ?? '·' }) }}
-                  </button>
-                  <span v-if="draft[k.id].savedAt" class="saved">✓</span>
-                </td>
-              </tr>
-              <tr v-if="openHistories[k.id]" class="history-row">
-                <td colspan="5">
-                  <HistoryPanel :events="historyFor[k.id] || []" />
-                </td>
-              </tr>
-            </template>
+            <tr v-for="k in keys" :key="k.id" :class="rowClass(k)">
+              <td><code>{{ k.key_path }}</code></td>
+              <td class="source">{{ k.source_text || t('files.detail.emptyCell') }}</td>
+              <td>
+                <textarea
+                  v-model="draft[k.id].text"
+                  :disabled="!canEdit(k) || bulkRunning"
+                  class="translation-input textarea-auto"
+                ></textarea>
+                <input
+                  v-if="draft[k.id].status === 'needs_review'"
+                  v-model="draft[k.id].note"
+                  class="note-input"
+                  :placeholder="t('files.detail.note')"
+                  :disabled="!canEdit(k) || bulkRunning"
+                />
+              </td>
+              <td>
+                <span class="badge" :class="'status-' + (k.translation?.status || 'empty')">
+                  {{ statusLabel(k.translation?.status) }}
+                </span>
+                <span v-if="k.contested" class="badge status-contested" :title="t('files.detail.contestedTip', { n: k.distinct_correctors })">
+                  {{ t('files.detail.contested') }}
+                </span>
+              </td>
+              <td class="row-actions-cell">
+                <button v-if="canEdit(k)" @click="save(k)" :disabled="busy || bulkRunning" class="small">
+                  {{ t('files.detail.save') }}
+                </button>
+                <button v-if="canEdit(k)" @click="openExpanded(k)" class="small ghost" title="Expand">⤢</button>
+                <button
+                  v-if="canEdit(k) && aiEnabled"
+                  @click="aiOne(k)"
+                  :disabled="busy || bulkRunning"
+                  class="small ghost"
+                >
+                  {{ t('files.detail.ai') }}
+                </button>
+                <button class="small ghost" @click="toggleHistory(k.id)">
+                  {{ t('files.detail.historyLink', { n: historyCounts[k.id] ?? '·' }) }}
+                </button>
+                <span v-if="draft[k.id].savedAt" class="saved">✓</span>
+              </td>
+            </tr>
           </tbody>
         </table>
 
@@ -297,6 +310,32 @@
         </div>
       </div>
     </template>
+    
+    <HistoryPanel 
+      :visible="historyVisible" 
+      :events="currentHistory.events" 
+      @close="historyVisible = false" 
+    />
+
+    <div v-if="expandedKey" class="modal-backdrop" @click.self="closeExpanded">
+      <div class="modal-card expanded-modal">
+        <div class="row">
+          <h3>{{ expandedKey.key_path }}</h3>
+          <button @click="closeExpanded" class="ghost small">✕</button>
+        </div>
+        <div class="expanded-source">
+          <strong>Source:</strong>
+          <p>{{ expandedKey.source_text }}</p>
+        </div>
+        <div class="expanded-target">
+          <textarea v-model="expandedDraft.text" rows="8" class="translation-input large-textarea"></textarea>
+        </div>
+        <div class="row-actions" style="justify-content: flex-end; margin-top: 16px;">
+          <button @click="closeExpanded" class="ghost">Cancel</button>
+          <button @click="saveExpanded" :disabled="busy" class="primary">Save</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -333,6 +372,7 @@ const error = ref('')
 
 const filter = ref('all')
 const search = ref('')
+const attention = ref('')
 const compare = ref(false)
 const page = ref(1)
 const per_page = ref(50)
@@ -343,9 +383,12 @@ const assignChoice = ref('')
 const approveComment = ref('')
 const rejectComment = ref('')
 
-const historyFor      = reactive({})
-const historyCounts   = reactive({})
-const openHistories   = reactive({})
+const historyCounts = reactive({})
+const currentHistory = reactive({ keyId: null, events: [] })
+const historyVisible = ref(false)
+
+const expandedKey = ref(null)
+const expandedDraft = reactive({ text: '' })
 
 const myProjectRole = computed(() => {
   const me = members.value.find(m => m.user_id === auth.user?.id)
@@ -384,22 +427,33 @@ function errMsg(e) {
   return e.message
 }
 
+function openExpanded(k) {
+  expandedKey.value = k
+  expandedDraft.text = draft[k.id].text
+}
+
+function closeExpanded() {
+  expandedKey.value = null
+}
+
+async function saveExpanded() {
+  draft[expandedKey.value.id].text = expandedDraft.text
+  await save(expandedKey.value)
+  closeExpanded()
+}
+
 async function toggleHistory(keyId) {
-  if (openHistories[keyId]) {
-    openHistories[keyId] = false
-    return
+  try {
+    const data = await api.get(`/api/v1/keys/${keyId}/history`)
+    currentHistory.events = data.events || []
+    currentHistory.keyId = keyId
+    historyVisible.value = true
+    historyCounts[keyId] = (data.events || []).length
+  } catch (_) {
+    currentHistory.events = []
+    currentHistory.keyId = keyId
+    historyVisible.value = true
   }
-  if (!historyFor[keyId]) {
-    try {
-      const data = await api.get(`/api/v1/keys/${keyId}/history`)
-      historyFor[keyId] = data.events || []
-      historyCounts[keyId] = (data.events || []).length
-    } catch (_) {
-      historyFor[keyId] = []
-      historyCounts[keyId] = 0
-    }
-  }
-  openHistories[keyId] = true
 }
 
 async function loadEngines() {
@@ -463,6 +517,7 @@ async function reload(p = page.value) {
   const params = [`page=${p}`, `per_page=${per_page.value}`]
   if (filter.value !== 'all') params.push(`status=${filter.value}`)
   if (compare.value)         params.push('with_previous=1')
+  if (attention.value)       params.push(`attention=${attention.value}`)
   if (search.value.trim())   params.push(`q=${encodeURIComponent(search.value.trim())}`)
   const data = await api.get(`/api/v1/files/${id}/keys?${params.join('&')}`)
   keys.value = data.keys || []
@@ -514,20 +569,35 @@ async function unassign() {
 }
 
 async function save(k) {
+  const current = k.translation?.text || ''
+  const next = draft[k.id].text || ''
+  const currentNote = k.translation?.note || ''
+  const nextNote = draft[k.id].note || ''
+  const currentStatus = k.translation?.status || 'empty'
+  let nextStatus = draft[k.id].status || 'empty'
+
+  if (nextStatus === 'ai_draft' || nextStatus === 'empty') {
+    nextStatus = nextNote.length > 0 ? 'needs_review' : 'translated'
+  }
+
+  if (current === next && currentNote === nextNote && currentStatus === nextStatus) {
+    draft[k.id].savedAt = Date.now()
+    return
+  }
+
   busy.value = true
   error.value = ''
   try {
-    const body = { text: draft[k.id].text }
-    if (draft[k.id].status === 'needs_review') {
-      body.status = 'needs_review'
-      body.note = draft[k.id].note
+    const body = { text: next, status: nextStatus }
+    if (nextStatus === 'needs_review') {
+      body.note = nextNote
     }
     const data = await api.patch(`/api/v1/keys/${k.id}/translation`, body)
     k.translation = data.translation
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
     draft[k.id].savedAt = Date.now()
-    delete historyFor[k.id]
+    delete historyCounts[k.id]
     await loadStats()
     await refreshFile()
   } catch (e) { error.value = errMsg(e) }
@@ -545,7 +615,7 @@ async function aiOne(k) {
     draft[k.id].text = data.translation.text || ''
     draft[k.id].status = data.translation.status
     draft[k.id].note = data.translation.note || ''
-    delete historyFor[k.id]
+    delete historyCounts[k.id]
     await loadStats()
     await refreshFile()
   } catch (e) { error.value = errMsg(e) }
@@ -561,7 +631,7 @@ async function translateFile() {
       engine: 'libretranslate',
     })
     lastBulk.value = data
-    for (const k of Object.keys(historyFor)) delete historyFor[k]
+    for (const k in historyCounts) delete historyCounts[k]
     await reload(1)
     await loadStats()
     await refreshFile()
@@ -607,6 +677,16 @@ function openFile(kind) {
   if (kind === 'export-approved') {
     window.open(`/api/v1/files/${file.value.id}/export?revision=latest_approved`, '_blank')
   }
+}
+
+function formatLastAction(k) {
+  if (!k.translation) return t('files.detail.emptyCell')
+  if (k.translation.translated_by_ai) {
+    return `AI (${k.translation.ai_engine || '?'})`
+  }
+  const author = k.translation.translated_by_user_id === auth.user?.id ? 'You' : `User #${k.translation.translated_by_user_id}`
+  // We will improve this when the API sends user names in the translation object
+  return `${t('files.detail.actionLabels.' + (k.translation.status || 'empty'))} by ${author}`
 }
 
 onMounted(load)

@@ -25,6 +25,10 @@
             <span class="stat-approved">{{ project.files_approved }} {{ t('projects.approvedLabel') }}</span>
             <span class="dot">·</span>
             <span class="stat-open">{{ project.files_not_approved }} {{ t('projects.openLabel') }}</span>
+            <span v-if="project.files_contested > 0" class="dot">·</span>
+            <span v-if="project.files_contested > 0" class="stat-contested">
+              {{ project.files_contested }} {{ t('projects.contestedLabel') }}
+            </span>
             <span class="dot">·</span>
             <span>{{ formatNum(project.words_total) }} {{ t('projects.wordsLabel') }}</span>
           </div>
@@ -90,18 +94,21 @@
           <thead>
             <tr>
               <th>{{ t('projects.memberUser') }}</th>
-              <th>{{ t('users.columns.email') }}</th>
               <th>{{ t('projects.memberRole') }}</th>
-              <th class="num">{{ t('projects.wordsTranslated') }}</th>
+              <th class="num">{{ t('files.detail.statsTranslated') }}</th>
+              <th class="num">{{ t('files.detail.statsCorrected') }}</th>
               <th class="actions-col"></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="m in members" :key="m.user_id">
-              <td>{{ m.name }}</td>
-              <td class="muted">{{ m.email }}</td>
+              <td>
+                <strong>{{ m.name }}</strong><br>
+                <small class="muted">{{ m.email }}</small>
+              </td>
               <td><span class="badge" :class="'role-' + m.role">{{ m.role }}</span></td>
               <td class="num">{{ formatNum(m.words_translated) }}</td>
+              <td class="num">{{ formatNum(m.words_corrected) }}</td>
               <td class="row-actions-cell">
                 <button
                   v-if="canManageMembers && m.user_id !== auth.user?.id"
