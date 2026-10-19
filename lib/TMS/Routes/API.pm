@@ -101,6 +101,10 @@ sub register ($self, $app, $conf) {
   $admin->post ('/users/:id/password')->to('Users#set_password');
 
   $authed->get ('/keys/:id/history')                ->to('Translations#history');
+
+  $authed->get ('/projects/:id/memory')             ->to('Projects#memory');
+
+  $authed->get ('/projects/:id/audit')              ->to('Audit#project');
 }
 
 1;

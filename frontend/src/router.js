@@ -8,6 +8,7 @@ const routes = [
   { path: '/projects/:id', name: 'project', component: () => import('./views/Project.vue') },
   { path: '/files/:id', name: 'file', component: () => import('./views/File.vue') },
   { path: '/users', name: 'users', component: () => import('./views/Users.vue'), meta: { admin: true } },
+  { path: '/projects/:id/audit', name: 'audit', component: () => import('./views/Audit.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 

@@ -38,6 +38,10 @@
         </div>
         <div v-if="canManageMembers" class="row-actions" style="align-self: flex-start;">
           <button @click="startEdit" class="btn-link">{{ t('projects.edit') }}</button>
+          <div v-if="canManageMembers" class="row-actions" style="align-self: flex-start;">
+            <router-link :to="`/projects/${project.id}/audit`" class="btn-link">Activity Log</router-link>
+            <button @click="startEdit" class="btn-link">{{ t('projects.edit') }}</button>
+          </div>
         </div>
       </div>
 
