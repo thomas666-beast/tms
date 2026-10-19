@@ -1223,3 +1223,18 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--muted);
   margin-top: 6px;
 }
+
+.modal-card .form-grid {
+  margin-bottom: 16px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-label { font-size: 14px; color: var(--muted); }
+.stat-value { font-weight: 600; color: var(--text); }
+.success-text { color: var(--success); margin-top: 8px; }

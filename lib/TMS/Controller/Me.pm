@@ -1,15 +1,15 @@
 package TMS::Controller::Me;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
+use Authen::Passphrase::BlowfishCrypt;
+
 sub dashboard ($c) {
   my $me = $c->current_user;
 
   my $assigned = $c->db->query(
     q{
-      SELECT f.id, f.name, f.format, f.status, f.target_lang, f.source_lang,
-             f.updated_at,
-             p.id   AS project_id,
-             p.name AS project_name
+      SELECT f.id, f.name, f.format, f.status, f.target_lang, f.source_lang, f.updated_at,
+             p.id AS project_id, p.name AS project_name
         FROM files f
         JOIN projects p ON p.id = f.project_id
        WHERE f.assigned_to_user_id = ?
@@ -23,8 +23,7 @@ sub dashboard ($c) {
   my $reviewable = $c->db->query(
     q{
       SELECT DISTINCT f.id, f.name, f.status, f.target_lang, f.updated_at,
-             p.id   AS project_id,
-             p.name AS project_name,
+             p.id AS project_id, p.name AS project_name,
              (SELECT count(*) FROM approvals a
                 WHERE a.revision_id = f.current_revision_id
                   AND a.decision = 'approve') AS approval_count
@@ -32,10 +31,7 @@ sub dashboard ($c) {
         JOIN projects p ON p.id = f.project_id
         LEFT JOIN project_members m ON m.project_id = f.project_id AND m.user_id = ?
        WHERE f.status = 'in_review'
-         AND (
-              ? = 'admin'
-              OR m.role IN ('admin','lead')
-         )
+         AND ( ? = 'admin' OR m.role IN ('admin','lead') )
        ORDER BY f.updated_at DESC
        LIMIT 10
     },
@@ -45,12 +41,10 @@ sub dashboard ($c) {
   my $approved = $c->db->query(
     q{
       SELECT DISTINCT f.id, f.name, f.status, f.target_lang, f.updated_at,
-             p.id   AS project_id,
-             p.name AS project_name
+             p.id AS project_id, p.name AS project_name
         FROM files f
         JOIN projects p ON p.id = f.project_id
-        LEFT JOIN approvals a
-          ON a.file_id = f.id AND a.user_id = ?
+        LEFT JOIN approvals a ON a.file_id = f.id AND a.user_id = ?
        WHERE f.status = 'approved'
          AND (f.assigned_to_user_id = ? OR a.id IS NOT NULL)
        ORDER BY f.updated_at DESC
@@ -59,11 +53,70 @@ sub dashboard ($c) {
     $me->{id}, $me->{id},
   )->hashes;
 
+  # Lifetime stats
+  my $stats = $c->db->query(
+    q{
+      SELECT
+        COALESCE(sum(word_count) FILTER (WHERE action = 'translate'), 0) AS words_translated,
+        COALESCE(sum(word_count) FILTER (WHERE action = 'correct'), 0) AS words_corrected
+        FROM translations
+       WHERE translated_by_user_id = ?
+         AND translated_by_ai = false
+    },
+    $me->{id},
+  )->hash;
+
   $c->render(json => {
     assigned        => [ map { _row($_) } @$assigned ],
     reviewable      => [ map { _row($_) } @$reviewable ],
     recent_approved => [ map { _row($_) } @$approved ],
+    stats => {
+      words_translated => 0 + $stats->{words_translated},
+      words_corrected  => 0 + $stats->{words_corrected},
+    },
   });
+}
+
+sub change_password ($c) {
+  my $me = $c->current_user;
+  my $body = $c->req->json || {};
+  my $old = $body->{old_password} // '';
+  my $new = $body->{new_password} // '';
+
+  return _err($c, 400, 'old_password_required') unless length $old;
+  return _err($c, 400, 'new_password_required') unless length $new;
+
+  my $u = $c->db->query(
+    'SELECT password_hash FROM users WHERE id = ?',
+    $me->{id},
+  )->hash;
+
+  my $ok = eval {
+    my $pp = Authen::Passphrase::BlowfishCrypt->from_rfc2307($u->{password_hash});
+    $pp->match($old) ? 1 : 0;
+  } || 0;
+
+  return _err($c, 400, 'invalid_old_password') unless $ok;
+
+  my $hash = Authen::Passphrase::BlowfishCrypt->new(
+    cost        => 10,
+    salt_random => 1,
+    passphrase  => $new,
+  )->as_rfc2307;
+
+  $c->db->query(
+    'UPDATE users SET password_hash = ? WHERE id = ?',
+    $hash, $me->{id},
+  );
+
+  # Revoke all sessions EXCEPT the current one
+  my $sid = $c->stash('session_id');
+  $c->db->query(
+    'UPDATE sessions SET revoked_at = now() WHERE user_id = ? AND id <> ? AND revoked_at IS NULL',
+    $me->{id}, $sid // '',
+  );
+
+  $c->render(json => { ok => 1 });
 }
 
 sub _row ($r) {
@@ -77,6 +130,11 @@ sub _row ($r) {
   );
   $out{approval_count} = 0 + $r->{approval_count} if exists $r->{approval_count};
   return \%out;
+}
+
+sub _err ($c, $status, $code) {
+  $c->render(json => { error => $code }, status => $status);
+  return undef;
 }
 
 1;

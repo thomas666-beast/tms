@@ -105,6 +105,8 @@ sub register ($self, $app, $conf) {
   $authed->get ('/projects/:id/memory')             ->to('Projects#memory');
 
   $authed->get ('/projects/:id/audit')              ->to('Audit#project');
+
+  $authed->post('/me/password')                     ->to('Me#change_password');
 }
 
 1;

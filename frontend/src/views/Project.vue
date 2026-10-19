@@ -8,7 +8,8 @@
     <p v-else-if="error" class="error">{{ error }}</p>
 
     <template v-else-if="project">
-      <div v-if="!editing" class="file-header">
+      <!-- Header (Always visible) -->
+      <div class="file-header">
         <div style="flex: 1;">
           <h1 class="file-title">
             {{ project.name }}
@@ -25,7 +26,6 @@
             <span>{{ formatNum(project.words_total) }} {{ t('projects.wordsLabel') }}</span>
           </div>
           
-          <!-- Progress Bar -->
           <div class="project-progress">
             <div class="progress-bar-bg">
               <div class="progress-bar-fill" :style="{ width: project.progress_percent + '%' }"></div>
@@ -36,27 +36,14 @@
             </div>
           </div>
         </div>
+        
         <div v-if="canManageMembers" class="row-actions" style="align-self: flex-start;">
-          <button @click="startEdit" class="btn-link">{{ t('projects.edit') }}</button>
-          <div v-if="canManageMembers" class="row-actions" style="align-self: flex-start;">
-            <router-link :to="`/projects/${project.id}/audit`" class="btn-link">Activity Log</router-link>
-            <button @click="startEdit" class="btn-link">{{ t('projects.edit') }}</button>
-          </div>
+          <router-link :to="`/projects/${project.id}/audit`" class="btn-link">Activity Log</router-link>
+          <button @click="openEditModal" class="btn-link">{{ t('projects.edit') }}</button>
         </div>
       </div>
 
-      <div v-else class="form-box">
-        <h3>{{ t('projects.editTitle') }}</h3>
-        <div class="form-grid">
-          <label>{{ t('projects.editName') }}<input v-model="editDraft.name" /></label>
-          <label>{{ t('projects.editLang') }}<input v-model="editDraft.default_source_lang" /></label>
-        </div>
-        <div class="row-actions">
-          <button @click="saveEdit" :disabled="busy" class="primary">{{ t('projects.editSave') }}</button>
-          <button @click="cancelEdit" class="ghost">{{ t('projects.editCancel') }}</button>
-        </div>
-      </div>
-
+      <!-- Members -->
       <div class="row">
         <h2>{{ t('projects.members') }}</h2>
         <button v-if="canManageMembers" @click="startAddMember" class="primary">
@@ -128,6 +115,7 @@
         </table>
       </div>
 
+      <!-- Files -->
       <div class="row" style="margin-top: 32px;">
         <h2>{{ t('projects.files') }}</h2>
         <div class="row-actions">
@@ -206,10 +194,7 @@
               <td>{{ f.name }}</td>
               <td><code>{{ f.format }}</code></td>
               <td>{{ f.target_lang }}</td>
-              <td>
-                <span class="badge" :class="'status-' + f.status">{{ f.status }}</span>
-                <!-- We don't have contested count per file in the list query yet, but if we did we'd show it here -->
-              </td>
+              <td><span class="badge" :class="'status-' + f.status">{{ f.status }}</span></td>
               <td>{{ f.assigned_to_name || t('files.unassigned') }}</td>
               <td class="num">{{ f.keys_count }}</td>
               <td class="num">{{ formatNum(f.words_total) }}</td>
@@ -218,6 +203,30 @@
         </table>
       </div>
     </template>
+
+    <!-- Edit Project Modal -->
+    <div v-if="editing" class="modal-backdrop" @click.self="cancelEdit">
+      <div class="modal-card">
+        <div class="row">
+          <h3>{{ t('projects.editTitle') }}</h3>
+          <button @click="cancelEdit" class="ghost small">✕</button>
+        </div>
+        <div class="form-grid" style="grid-template-columns: 1fr;">
+          <label>
+            {{ t('projects.editName') }}
+            <input v-model="editDraft.name" />
+          </label>
+          <label>
+            {{ t('projects.editLang') }}
+            <input v-model="editDraft.default_source_lang" />
+          </label>
+        </div>
+        <div class="row-actions" style="justify-content: flex-end; margin-top: 16px;">
+          <button @click="cancelEdit" class="ghost">{{ t('common.cancel') }}</button>
+          <button @click="saveEdit" :disabled="busy" class="primary">{{ t('projects.editSave') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -268,7 +277,6 @@ const filteredFiles = computed(() => {
   if (fileFilter.value === 'all') return files.value
   if (fileFilter.value === 'approved') return files.value.filter(f => f.status === 'approved')
   if (fileFilter.value === 'in_progress') return files.value.filter(f => f.status !== 'approved')
-  // If we had contested data per file, we'd filter here
   return files.value
 })
 
@@ -300,12 +308,15 @@ async function load() {
   } finally { loading.value = false }
 }
 
-function startEdit() {
-  editing.value = true
+function openEditModal() {
   editDraft.name = project.value.name
   editDraft.default_source_lang = project.value.default_source_lang
+  editing.value = true
 }
-function cancelEdit() { editing.value = false }
+
+function cancelEdit() {
+  editing.value = false
+}
 
 async function saveEdit() {
   busy.value = true

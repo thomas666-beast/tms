@@ -4,6 +4,7 @@ export default {
     dashboard: 'Dashboard',
     projects: 'Projects',
     users: 'Users',
+    profile: 'My Profile',
     signOut: 'Sign out',
     notifications: 'Notifications',
   },

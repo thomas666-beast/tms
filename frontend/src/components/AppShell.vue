@@ -20,7 +20,9 @@
 
       <div class="sidebar-user">
         <div class="user-meta">
-          <div class="user-name">{{ auth.user?.name }}</div>
+          <router-link to="/profile" class="user-name" style="text-decoration: none; color: inherit;">
+            {{ auth.user?.name }}
+          </router-link>
           <div class="user-role">{{ auth.user?.role }}</div>
         </div>
         <button @click="onLogout" class="ghost small">{{ t('nav.signOut') }}</button>
