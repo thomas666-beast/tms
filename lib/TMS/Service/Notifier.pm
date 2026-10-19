@@ -7,7 +7,22 @@ has 'db';
 
 sub emit ($self, $user_id, $type, $entity_type, $entity_id, $payload = {}) {
   return unless defined $user_id;
-  die "Notifier requires db\n" unless $self->db;
+
+  # Check user preferences
+  my $prefs = $self->db->query(
+    'SELECT notification_preferences FROM users WHERE id = ?',
+    $user_id,
+  )->hash->{notification_preferences} // {};
+
+  # Convert JSONB to Perl hash if needed
+  if (!ref $prefs) {
+    require Mojo::JSON;
+    $prefs = eval { Mojo::JSON::decode_json($prefs) } || {};
+  }
+
+  # If the specific preference is explicitly set to 0, skip
+  return if defined $prefs->{$type} && !$prefs->{$type};
+
   $self->db->query(
     q{
       INSERT INTO notifications

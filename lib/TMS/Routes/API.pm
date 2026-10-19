@@ -109,6 +109,9 @@ sub register ($self, $app, $conf) {
   $authed->post('/me/password')                     ->to('Me#change_password');
 
   $authed->post('/files/:id/preview')               ->to('Files#preview');
+
+  $authed->get('/me/preferences')                   ->to('Me#get_preferences');
+  $authed->patch('/me/preferences')                 ->to('Me#set_preferences');
 }
 
 1;

@@ -53,7 +53,7 @@ sub dashboard ($c) {
     $me->{id}, $me->{id},
   )->hashes;
 
-  # Lifetime stats
+  # Stats
   my $stats = $c->db->query(
     q{
       SELECT
@@ -66,15 +66,55 @@ sub dashboard ($c) {
     $me->{id},
   )->hash;
 
+  # Recent Activity (last 10 events from accessible projects)
+  my $recent = $c->db->query(
+    q{
+      SELECT a.id, a.action, a.new_value, a.created_at,
+             u.name AS user_name,
+             f.name AS file_name, p.name AS project_name
+        FROM audit_log a
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN files f ON a.entity_type = 'file' AND a.entity_id = f.id
+        LEFT JOIN projects p ON f.project_id = p.id
+       WHERE (a.entity_type = 'file' AND f.project_id IN (
+                 SELECT project_id FROM project_members WHERE user_id = ?
+                 UNION
+                 SELECT id FROM projects WHERE ? = 'admin'
+              ))
+         AND a.action IN ('file.submit', 'file.approve', 'file.reject', 'translation.ai')
+       ORDER BY a.created_at DESC
+       LIMIT 10
+    },
+    $me->{id}, $me->{role},
+  )->hashes;
+
   $c->render(json => {
     assigned        => [ map { _row($_) } @$assigned ],
     reviewable      => [ map { _row($_) } @$reviewable ],
     recent_approved => [ map { _row($_) } @$approved ],
+    recent_activity => [ map { _activity_row($_) } @$recent ],
     stats => {
       words_translated => 0 + $stats->{words_translated},
       words_corrected  => 0 + $stats->{words_corrected},
     },
   });
+}
+
+sub _activity_row ($r) {
+  my $payload = $r->{new_value};
+  if (defined $payload && !ref $payload) {
+    require Mojo::JSON;
+    $payload = eval { Mojo::JSON::decode_json($payload) };
+  }
+  return {
+    id           => 0 + $r->{id},
+    action       => $r->{action},
+    user_name    => $r->{user_name} // 'System',
+    file_name    => $r->{file_name} // 'Unknown',
+    project_name => $r->{project_name} // '',
+    word_count   => $payload && $payload->{word_count} ? 0 + $payload->{word_count} : 0,
+    created_at   => $r->{created_at},
+  };
 }
 
 sub change_password ($c) {
@@ -135,6 +175,34 @@ sub _row ($r) {
 sub _err ($c, $status, $code) {
   $c->render(json => { error => $code }, status => $status);
   return undef;
+}
+
+sub get_preferences ($c) {
+  my $me = $c->current_user;
+  my $prefs = $c->db->query(
+    'SELECT notification_preferences FROM users WHERE id = ?',
+    $me->{id},
+  )->hash->{notification_preferences} // {};
+  
+  if (!ref $prefs) {
+    require Mojo::JSON;
+    $prefs = eval { Mojo::JSON::decode_json($prefs) } || {};
+  }
+
+  $c->render(json => { preferences => $prefs });
+}
+
+sub set_preferences ($c) {
+  my $me = $c->current_user;
+  my $body = $c->req->json || {};
+  my $prefs = $body->{preferences} || {};
+
+  $c->db->query(
+    'UPDATE users SET notification_preferences = ?::jsonb WHERE id = ?',
+    Mojo::JSON::encode_json($prefs), $me->{id},
+  );
+
+  $c->render(json => { ok => 1 });
 }
 
 1;

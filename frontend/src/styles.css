@@ -1464,3 +1464,9 @@ html.dark .badge.role-admin      { background: #1e3a8a; color: #93c5fd; }
 html.dark .badge.role-lead       { background: #78350f; color: #fbbf24; }
 html.dark .badge.role-translator { background: #064e3b; color: #34d399; }
 html.dark .badge.role-lead_translator { background: #78350f; color: #fbbf24; }
+
+.pref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
