@@ -3,6 +3,106 @@
    ============================================================ */
 *, *::before, *::after { box-sizing: border-box; }
 
+/* ============================================================
+   Dark Mode
+   ============================================================ */
+.dark {
+  --bg:        #111827;
+  --surface:   #1f2937;
+  --border:    #374151;
+  --border-2:  #4b5563;
+  --text:      #f3f4f6;
+  --text-2:    #d1d5db;
+  --muted:     #9ca3af;
+  --accent:    #6366f1;
+  --accent-h:  #4f46e5;
+  --danger:    #ef4444;
+  --success:   #10b981;
+  --warning:   #f59e0b;
+}
+.dark body {
+  background: var(--bg);
+  color: var(--text);
+}
+.dark .sidebar {
+  background: #0f172a;
+}
+.dark .table th {
+  background: #111827;
+  border-bottom-color: var(--border);
+}
+.dark tr.clickable:hover {
+  background: #374151;
+}
+.dark .panel,
+.dark .table-card,
+.dark .form-box,
+.dark .review-card,
+.dark .history-panel {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.dark input, .dark select, .dark textarea {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border-2);
+}
+.dark .toast-info { background: #374151; }
+.dark .modal-card { background: var(--surface); }
+.dark .modal-backdrop { background: rgba(0, 0, 0, 0.7); }
+.dark .history-modal .table th { background: var(--surface); }
+.dark .code-preview { background: #0d1117; }
+.dark .stat-row { border-bottom-color: var(--border); }
+.dark .expanded-source { background: #111827; }
+
+/* ============================================================
+   Sidebar Collapse
+   ============================================================ */
+.sidebar {
+  transition: width 0.2s ease, padding 0.2s ease;
+  width: 240px;
+}
+.sidebar-collapsed {
+  width: 64px;
+}
+.sidebar-collapsed .brand-name,
+.sidebar-collapsed .nav-link span:not(.nav-icon),
+.sidebar-collapsed .user-meta,
+.sidebar-collapsed .sidebar-user button span:not(.nav-icon) {
+  display: none;
+}
+.sidebar-collapsed .nav-link {
+  justify-content: center;
+  padding: 12px;
+}
+.sidebar-collapsed .brand {
+  justify-content: center;
+  padding: 4px 0 24px 0;
+}
+.sidebar-collapsed .sidebar-user {
+  align-items: center;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.nav-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+/* Update grid layout to use flex so sidebar can shrink */
+.shell {
+  display: flex;
+}
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
 :root {
   --bg:        #f7f8fa;
   --surface:   #ffffff;
@@ -1249,4 +1349,21 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .checkbox-label input {
   width: auto;
   margin: 0;
+}
+
+.export-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.code-preview {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 500px;
 }

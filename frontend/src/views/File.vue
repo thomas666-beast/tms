@@ -28,11 +28,8 @@
           </div>
         </div>
         <div class="row-actions">
-          <a :href="`/api/v1/files/${file.id}/export`" class="btn-link" target="_blank">
-            {{ t('files.detail.exportCurrent') }}
-          </a>
-          <button @click="openFile('export-approved')" class="btn-link">
-            {{ t('files.detail.exportApproved') }}
+          <button @click="exportModalVisible = true" class="btn-link">
+            Preview & Export
           </button>
         </div>
       </div>
@@ -243,7 +240,6 @@
         </label>
       </div>
 
-      <!-- Memory Results for Main Table -->
       <div v-if="tmResults.length > 0" class="memory-panel">
         <h4>Translation Memory</h4>
         <ul>
@@ -344,7 +340,12 @@
       @close="historyVisible = false" 
     />
 
-    <!-- Expand Modal -->
+    <ExportModal 
+      :visible="exportModalVisible" 
+      :fileId="file?.id" 
+      @close="exportModalVisible = false" 
+    />
+
     <div v-if="expandedKey" class="modal-backdrop" @click.self="closeExpanded">
       <div class="modal-card expanded-modal">
         <div class="row">
@@ -392,6 +393,7 @@ import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { api } from '../api'
 import HistoryPanel from '../components/HistoryPanel.vue'
+import ExportModal from '../components/ExportModal.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -433,6 +435,8 @@ const rejectComment = ref('')
 const historyCounts = reactive({})
 const currentHistory = reactive({ keyId: null, events: [] })
 const historyVisible = ref(false)
+
+const exportModalVisible = ref(false)
 
 const expandedKey = ref(null)
 const expandedDraft = reactive({ text: '' })
@@ -680,7 +684,7 @@ async function unassign() {
   finally { busy.value = false }
 }
 
-async function save(k) {
+async function save(k, force = false) {
   const current = k.translation?.text || ''
   const next = draft[k.id].text || ''
   const currentNote = k.translation?.note || ''
@@ -705,6 +709,7 @@ async function save(k) {
       status: nextStatus,
       lock_version: file.value.lock_version 
     }
+    if (force) body.force = 1
     if (nextStatus === 'needs_review') {
       body.note = nextNote
     }
@@ -721,6 +726,13 @@ async function save(k) {
     await loadStats()
     await refreshFile()
   } catch (e) {
+    if (e.data && e.data.error === 'missing_tags') {
+      const tags = (e.data.tags || []).join(', ')
+      if (window.confirm(`Warning: You removed tags from the translation (${tags}). Are you sure you want to save?`)) {
+        return save(k, true)
+      }
+      return
+    }
     if (e.data && e.data.error === 'stale_data') {
       toast.error('This file was updated in the background. Reloading to get the latest changes.')
       await load()
@@ -798,12 +810,6 @@ async function reject() {
     await load()
   } catch (e) { error.value = errMsg(e) }
   finally { busy.value = false }
-}
-
-function openFile(kind) {
-  if (kind === 'export-approved') {
-    window.open(`/api/v1/files/${file.value.id}/export?revision=latest_approved`, '_blank')
-  }
 }
 
 onMounted(load)
