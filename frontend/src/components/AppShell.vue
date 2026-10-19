@@ -42,7 +42,7 @@
         </button>
         
         <div class="row-actions">
-          <button @click="toggle" class="ghost small" :title="isDark ? 'Light mode' : 'Dark mode'">
+          <button @click="toggleTheme" class="ghost small" :title="isDark ? 'Light mode' : 'Dark mode'">
             {{ isDark ? '☀' : '☾' }}
           </button>
           <NotificationsBell />
@@ -66,7 +66,7 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const router = useRouter()
 const notifs = useNotificationsStore()
-const { isDark, toggle } = useDarkMode()
+const { isDark, toggle: toggleTheme } = useDarkMode()
 
 const collapsed = ref(false)
 const isAdmin = computed(() => auth.user?.role === 'admin')

@@ -5,6 +5,22 @@
       <button @click="startCreate" class="primary">{{ t('users.newUser') }}</button>
     </div>
 
+    <div class="toolbar" style="margin-bottom: 16px;">
+      <label>
+        Search
+        <input v-model="search" placeholder="Name or email..." style="width: 250px;" />
+      </label>
+      <label>
+        Role
+        <select v-model="roleFilter">
+          <option value="all">All Roles</option>
+          <option value="admin">Admins</option>
+          <option value="lead_translator">Leads</option>
+          <option value="translator">Translators</option>
+        </select>
+      </label>
+    </div>
+
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
 
@@ -34,8 +50,8 @@
         <table class="table">
           <thead>
             <tr>
-              <th>{{ t('users.columns.email') }}</th>
               <th>{{ t('users.columns.name') }}</th>
+              <th>{{ t('users.columns.email') }}</th>
               <th>{{ t('users.columns.role') }}</th>
               <th>{{ t('users.columns.active') }}</th>
               <th>{{ t('users.columns.created') }}</th>
@@ -43,15 +59,17 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="u in users" :key="u.id">
+            <template v-for="u in filteredUsers" :key="u.id">
               <tr :class="{ inactive: !u.is_active }">
+                <td>
+                  <strong>{{ u.name }}</strong>
+                  <span v-if="u.id === auth.user?.id" class="badge" style="margin-left: 6px;">You</span>
+                </td>
                 <td>{{ u.email }}</td>
                 <td>
-                  <span v-if="editingId !== u.id">{{ u.name }}</span>
-                  <input v-else v-model="editDraft.name" />
-                </td>
-                <td>
-                  <span v-if="editingId !== u.id" class="badge" :class="'role-' + u.role">{{ u.role }}</span>
+                  <span v-if="editingId !== u.id" class="badge" :class="'role-' + u.role">
+                    {{ u.role }}
+                  </span>
                   <select v-else v-model="editDraft.role">
                     <option value="translator">{{ t('users.roles.translator') }}</option>
                     <option value="lead_translator">{{ t('users.roles.lead_translator') }}</option>
@@ -77,11 +95,15 @@
                 </td>
               </tr>
             </template>
+            <tr v-if="filteredUsers.length === 0">
+              <td colspan="6" class="muted" style="text-align: center;">No users match your criteria.</td>
+            </tr>
           </tbody>
         </table>
       </div>
     </template>
 
+    <!-- Reset Password Modal -->
     <div v-if="resettingId" class="modal-backdrop" @click.self="cancelReset">
       <div class="modal-card">
         <h3>{{ t('users.resetPasswordTitle') }}</h3>
@@ -90,7 +112,7 @@
           {{ t('users.resetPasswordTitle') }}
           <input v-model="resetPassword" type="password" autofocus />
         </label>
-        <div class="row-actions">
+        <div class="row-actions" style="margin-top: 16px;">
           <button @click="submitReset" :disabled="busy || !resetPassword" class="primary">{{ t('users.resetPasswordSubmit') }}</button>
           <button @click="cancelReset" class="ghost">{{ t('common.cancel') }}</button>
         </div>
@@ -103,15 +125,20 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../stores/auth'
 import { api } from '../api'
 
 const { t } = useI18n()
+const auth = useAuthStore()
 const router = useRouter()
 
 const users = ref([])
 const loading = ref(true)
 const error = ref('')
 const busy = ref(false)
+
+const search = ref('')
+const roleFilter = ref('all')
 
 const creating = ref(false)
 const newUser = reactive({ email: '', name: '', password: '', role: 'translator' })
@@ -122,6 +149,16 @@ const editDraft = reactive({ name: '', role: 'translator', is_active: true })
 const resettingId = ref(null)
 const resetUserEmail = ref('')
 const resetPassword = ref('')
+
+const filteredUsers = computed(() => {
+  return users.value.filter(u => {
+    const matchesSearch = 
+      u.name.toLowerCase().includes(search.value.toLowerCase()) ||
+      u.email.toLowerCase().includes(search.value.toLowerCase())
+    const matchesRole = roleFilter.value === 'all' || u.role === roleFilter.value
+    return matchesSearch && matchesRole
+  })
+})
 
 async function load() {
   loading.value = true

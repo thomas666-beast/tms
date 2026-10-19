@@ -31,6 +31,8 @@ export default {
     gettingStartedTitle: 'Get started',
     gettingStartedBody: 'You don\'t have any projects yet. Create your first project to start translating.',
     gettingStartedCta: 'Create your first project →',
+    activityTitle: 'Recent Activity',
+    activityEmpty: 'No recent activity.',
     columns: {
       name: 'File',
       project: 'Project',
@@ -119,6 +121,7 @@ export default {
       words: 'Words',
     },
     detail: {
+      ai: 'AI',
       backToProject: '← Back to project',
       sourceToTarget: '{source} → {target}',
       unassigned: 'Unassigned',
@@ -191,6 +194,10 @@ export default {
       attAi: 'AI unchecked',
       contested: 'contested',
       contestedTip: '{n} different users corrected this key',
+      exportPreview: 'Export Preview',
+      downloadFile: 'Download File',
+      copyToClipboard: 'Copy to Clipboard',
+      copied: 'Copied!',
     },
     status: {
       empty: 'empty',
@@ -200,6 +207,12 @@ export default {
       approved: 'approved',
       rejected: 'rejected',
     },
+    ai: {
+      save: 'Save',
+      saved: 'Saved',
+      ai: 'AI',
+      note: 'Note',
+    }
   },
   workflow: {
     submit: 'Submit for review',
