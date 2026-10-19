@@ -24,84 +24,113 @@ sub upload ($c) {
   my $target_lang = $c->param('target_lang') // '';
   my $name        = $c->param('name');
   my $group_id    = $c->param('group_id');
+  my $overwrite   = $c->param('overwrite') // 0;
 
   return _err($c, 400, 'format_required')      unless length $format;
   return _err($c, 400, 'source_lang_required') unless length $source_lang;
   return _err($c, 400, 'target_lang_required') unless length $target_lang;
-
-  return _err($c, 400, 'invalid_lang')
-    unless $source_lang =~ /\A[A-Za-z][A-Za-z0-9_-]{0,19}\z/
-        && $target_lang =~ /\A[A-Za-z][A-Za-z0-9_-]{0,19}\z/;
 
   my $adapter = eval { TMS::Adapter->for($format) };
   return _err($c, 400, 'unsupported_format') unless $adapter;
 
   my $upload = $c->req->upload('file');
   return _err($c, 400, 'file_required') unless $upload;
-  return _err($c, 400, 'file_empty')    unless $upload->size;
 
   $name = $upload->filename unless defined $name && length $name;
   return _err($c, 400, 'name_required') unless defined $name && length $name;
 
-  if (defined $group_id) {
-    return _err($c, 400, 'invalid_group_id') unless $group_id =~ /\A\d+\z/;
-    my $g = $c->db->query(
-      'SELECT 1 FROM file_groups WHERE id = ? AND project_id = ?',
-      $group_id, $project_id,
-    )->hash;
-    return _err($c, 404, 'group_not_found') unless $g;
-  }
-
   my $existing = $c->db->query(
-    'SELECT 1 FROM files WHERE project_id = ? AND name = ? AND target_lang = ?',
+    'SELECT id, current_revision_id FROM files WHERE project_id = ? AND name = ? AND target_lang = ?',
     $project_id, $name, $target_lang,
   )->hash;
-  return _err($c, 409, 'file_exists') if $existing;
+
+  if ($existing && !$overwrite) {
+    return _err($c, 409, 'file_exists');
+  }
 
   my $content = $upload->slurp;
   my $parsed  = eval { $adapter->parse($content) };
   if (!$parsed) {
-    my $msg = $@ || 'parse failed';
-    chomp $msg;
-    return _err($c, 400, 'invalid_file', { detail => $msg });
+    my $err = $@ || 'parse failed';
+    chomp $err;
+    return _err($c, 400, 'invalid_file', { detail => $err });
   }
 
   my $file;
   eval {
     $c->db->query('BEGIN');
 
-    $file = $c->db->query(
-      q{
-        INSERT INTO files
-          (project_id, group_id, name, format, source_lang, target_lang,
-           is_source, status, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, false, 'unassigned', ?)
-        RETURNING id, project_id, name, format, source_lang, target_lang, status, created_at
-      },
-      $project_id, $group_id, $name, $format, $source_lang, $target_lang, $me->{id},
-    )->hash;
+    if ($existing) {
+      # Update existing file
+      $file = $c->db->query(
+        'UPDATE files SET updated_at = now() WHERE id = ? RETURNING id, project_id, name, format, source_lang, target_lang, status, current_revision_id',
+        $existing->{id}
+      )->hash;
 
-    my $revision = $c->db->query(
-      q{
-        INSERT INTO file_revisions (file_id, revision_number, status, created_by_user_id)
-        VALUES (?, 1, 'open', ?)
-        RETURNING id
-      },
-      $file->{id}, $me->{id},
-    )->hash;
+      my $old_keys = $c->db->query(
+        'SELECT id, key_path, source_text FROM keys WHERE file_id = ?',
+        $file->{id}
+      )->hashes;
+      
+      my %old_by_path = map { $_->{key_path} => $_ } @$old_keys;
 
-    $c->db->query(
-      'UPDATE files SET current_revision_id = ? WHERE id = ?',
-      $revision->{id}, $file->{id},
-    );
+      for my $key_path (sort CORE::keys %$parsed) {
+        my $text  = $parsed->{$key_path} // '';
+        my $count = _word_count($text);
 
-    for my $key_path (sort CORE::keys %$parsed) {
-      my $text  = $parsed->{$key_path} // '';
-      my $count = _word_count($text);
+        if (my $old = $old_by_path{$key_path}) {
+          if ($old->{source_text} ne $text) {
+            $c->db->query(
+              'UPDATE keys SET source_text = ?, word_count = ? WHERE id = ?',
+              $text, $count, $old->{id}
+            );
+          }
+          delete $old_by_path{$key_path};
+        } else {
+          $c->db->query(
+            'INSERT INTO keys (file_id, key_path, source_text, word_count) VALUES (?, ?, ?, ?)',
+            $file->{id}, $key_path, $text, $count
+          );
+        }
+      }
+
+      for my $deleted (values %old_by_path) {
+        $c->db->query('DELETE FROM keys WHERE id = ?', $deleted->{id});
+      }
+    } else {
+      # Insert new file
+      $file = $c->db->query(
+        q{
+          INSERT INTO files
+            (project_id, group_id, name, format, source_lang, target_lang, status, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, 'unassigned', ?)
+          RETURNING id, project_id, name, format, source_lang, target_lang, status, created_at
+        },
+        $project_id, $group_id, $name, $format, $source_lang, $target_lang, $me->{id},
+      )->hash;
+
+      my $revision = $c->db->query(
+        q{
+          INSERT INTO file_revisions (file_id, revision_number, status, created_by_user_id)
+          VALUES (?, 1, 'open', ?)
+          RETURNING id
+        },
+        $file->{id}, $me->{id},
+      )->hash;
+
       $c->db->query(
-        'INSERT INTO keys (file_id, key_path, source_text, word_count) VALUES (?, ?, ?, ?)',
-        $file->{id}, $key_path, $text, $count,
+        'UPDATE files SET current_revision_id = ? WHERE id = ?',
+        $revision->{id}, $file->{id},
       );
+
+      for my $key_path (sort CORE::keys %$parsed) {
+        my $text  = $parsed->{$key_path} // '';
+        my $count = _word_count($text);
+        $c->db->query(
+          'INSERT INTO keys (file_id, key_path, source_text, word_count) VALUES (?, ?, ?, ?)',
+          $file->{id}, $key_path, $text, $count,
+        );
+      }
     }
 
     $c->db->query('COMMIT');
@@ -112,28 +141,16 @@ sub upload ($c) {
     return _err($c, 500, 'file_create_failed', { detail => "$err" });
   };
 
-  _audit($c, 'file.create', $file->{id}, {
-    project_id  => 0 + $project_id,
+  _audit($c, 'file.upload', $file->{id}, {
     name        => $file->{name},
     format      => $file->{format},
-    target_lang => $file->{target_lang},
+    overwrite   => $overwrite,
   });
 
   $c->render(json => {
-    file => {
-      id          => 0 + $file->{id},
-      project_id  => 0 + $file->{project_id},
-      name        => $file->{name},
-      format      => $file->{format},
-      source_lang => $file->{source_lang},
-      target_lang => $file->{target_lang},
-      status      => $file->{status},
-      keys_count  => scalar(CORE::keys %$parsed),
-      created_at  => $file->{created_at},
-    },
-  }, status => 201);
+    file => _public_file($file, { keys_count => scalar(CORE::keys %$parsed) }),
+  }, status => $existing ? 200 : 201);
 }
-
 sub list_by_project ($c) {
   my $project_id = $c->param('id');
   return _err($c, 400, 'invalid_id') unless $project_id =~ /\A\d+\z/;
@@ -784,10 +801,11 @@ sub _public_file ($f, $counts = undef) {
     created_at          => $f->{created_at},
     updated_at          => $f->{updated_at},
   );
+  
   if ($counts) {
     for my $k (qw(words_translated words_corrected words_validated
-                  words_self_edits words_ai_unchecked words_approved)) {
-      $out{$k} = 0 + ($counts->{$k} // 0);
+                  words_self_edits words_ai_unchecked words_approved keys_count)) {
+      $out{$k} = 0 + ($counts->{$k} // 0) if exists $counts->{$k};
     }
   }
   return \%out;
